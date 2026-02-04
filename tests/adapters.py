@@ -9,6 +9,8 @@ import torch
 from jaxtyping import Bool, Float, Int
 from torch import Tensor
 
+from student.bpe_trainer_sec_one import run_train_bpe_util, get_tokenizer_util
+
 
 def run_linear(
     d_in: int,
@@ -517,7 +519,7 @@ def run_save_checkpoint(
         optimizer (torch.optim.Optimizer): Serialize the state of this optimizer.
         iteration (int): Serialize this value, which represents the number of training iterations
             we've completed.
-        out (str | os.PathLike | BinaryIO | IO[bytes]): Path or file-like object to serialize the model, optimizer, and iteration to.
+        out (str | os.PathLike |ƒ BinaryIO | IO[bytes]): Path or file-like object to serialize the model, optimizer, and iteration to.
     """
     raise NotImplementedError
 
@@ -563,7 +565,9 @@ def get_tokenizer(
     Returns:
         A BPE tokenizer that uses the provided vocab, merges, and special tokens.
     """
-    raise NotImplementedError
+
+    # raise NotImplementedError
+    return get_tokenizer_util(vocab, merges, special_tokens)
 
 
 def run_train_bpe(
@@ -593,4 +597,9 @@ def run_train_bpe(
                 representing that <token1> was merged with <token2>.
                 Merges are ordered by order of creation.
     """
-    raise NotImplementedError
+
+    vocab, merges = run_train_bpe_util(input_path, vocab_size, special_tokens, **kwargs)
+    return vocab, merges
+
+
+    # raise NotImplementedError

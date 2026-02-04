@@ -1,0 +1,7 @@
+regex==2026.1.15
+pytest
+numpy
+torch
+jaxtyping
+psutil
+tiktoken
