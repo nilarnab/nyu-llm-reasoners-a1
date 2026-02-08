@@ -51,6 +51,7 @@ def test_swiglu(numpy_snapshot, ts_state_dict, in_embeddings, d_model, d_ff):
         w3_weight=w3_weight,
         in_features=in_embeddings,
     )
+
     numpy_snapshot.assert_match(actual_output, atol=1e-5)
 
 

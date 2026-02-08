@@ -161,3 +161,6 @@ cython_debug/
 
 .ruff_cache/
 *.zip
+
+student/sec_5/main_training/checkpoints
+student/ablation_studies/checkpoints

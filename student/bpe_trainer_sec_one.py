@@ -33,7 +33,7 @@ class Tokenizer:
         if pattern_special is not None:
             text_chunks = re.split(pattern_special, text_raw)
         else:
-            text_chunks = text_raw
+            text_chunks = [text_raw]
 
         # print("text_chunks", text_chunks)
 
@@ -44,23 +44,27 @@ class Tokenizer:
                 # print("got", self._token_to_id(text.encode("utf-8")))
                 res.append(self._token_to_id(text.encode("utf-8")))
                 pass
-            else:
+            elif text:
                 pre_tokens = []
                 for token in re.finditer(PAT, text):
                     # print("while enoding, getting token", token.group().encode("utf-8"))
 
                     pre_tokens.append(tuple(bytes([b]) for b in token.group().encode("utf-8")))
 
+                # print("pre tokens", pre_tokens)
+
                 new_pre_tokens = []
                 for token_raw in pre_tokens:
                     token = [el for el in token_raw]
                     for merge in self.merges:
+                    # for merge in []:
                         i = 0
                         new_token = []
                         while i < len(token):
                             if i + 1 < len(token):
                                 pair = (token[i], token[i + 1])
                                 if pair == merge:
+                                    # print("merging", pair)
                                     new_token_sub = merge[0] + merge[1]
                                     new_token.append(new_token_sub)
                                     i += 2
@@ -71,6 +75,7 @@ class Tokenizer:
                         token = [el for el in new_token]
                     new_pre_tokens.append(tuple(token))
 
+                # print("new pre tokens:", new_pre_tokens)
 
                 for token in new_pre_tokens:
                     # print("token in new pre token", token)
@@ -159,6 +164,7 @@ def get_pre_tokens(input_path: str | os.PathLike, special_tokens: list[str]):
     num_processes = 4
     boundaries = find_chunk_boundaries(file, num_processes, b"<|endoftext|>")
 
+    # taken from profs code:
     # The following is a serial implementation, but you can parallelize this
     # by sending each start/end pair to a set of processes.
     for start, end in zip(boundaries[:-1], boundaries[1:]):
