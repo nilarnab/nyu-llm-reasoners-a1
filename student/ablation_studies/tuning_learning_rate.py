@@ -26,13 +26,16 @@ from tests.adapters import get_adamw_cls
 SCRIPT_DIR = pathlib.Path(__file__).parent.absolute()
 PROJECT_ROOT = SCRIPT_DIR.parent.parent
 
+# ABSTRACTED
+# all files are supposed to be in fixtures
+INPUT_TRAIN_FILE_NAME = "tinystories_sample.txt"
+INPUT_VAL_FILE_NAME = "address.txt"
+
 # file paths
 FIXTURES_PATH = PROJECT_ROOT / "tests" / "fixtures"
-BPE_TRAIN_INPUT_PATH = f"{FIXTURES_PATH}/tinystories_sample_5M.txt"
+INPUT_TRAIN_FILE_PATH_ABS = f"{FIXTURES_PATH}/{INPUT_TRAIN_FILE_NAME}"
+INPUT_VAL_FILE_PATH_ABS = f"{FIXTURES_PATH}/{INPUT_VAL_FILE_NAME}"
 
-BPE_TRAIN_INPUT_PATH_MOCK = f"{FIXTURES_PATH}/tinystories_sample.txt"
-
-INPUT_PATH = BPE_TRAIN_INPUT_PATH
 ENCODED_TOKEN_PATH = str(SCRIPT_DIR / "encoded_tokens.npy")
 ENCODED_VAL_TOKEN_PATH = str(SCRIPT_DIR / "encoded_val_tokens.npy")
 CHECKPOINT_FOLDER = str(SCRIPT_DIR / "checkpoints")
@@ -107,7 +110,7 @@ logger_csv_writer = writer(logger_file)
 
 def tokenizer_training():
     vocab, merges = bpe_trainer_sec_one.run_train_bpe_util(
-        INPUT_PATH,
+        INPUT_TRAIN_FILE_PATH_ABS,
         VOCAB_LENGTH,
         SPECIAL_TOKENS
     )
@@ -119,7 +122,7 @@ def tokenizer_training():
 
 def encode_and_save_data(
         tokenizer: bpe_trainer_sec_one.Tokenizer,
-        input_path=INPUT_PATH,
+        input_path=INPUT_TRAIN_FILE_PATH_ABS,
         output_path=ENCODED_TOKEN_PATH
 ):
     file = open(input_path, "rb")
@@ -220,10 +223,15 @@ if __name__ == '__main__':
         print("training tokenizer")
         tokenizer = tokenizer_training()
         print("encoding corpus")
-        encode_and_save_data(tokenizer, input_path=BPE_TRAIN_INPUT_PATH_MOCK)
-        encode_and_save_data(tokenizer,
-                             input_path=BPE_TRAIN_INPUT_PATH_MOCK,
-                             output_path=ENCODED_VAL_TOKEN_PATH)
+
+        print("encoding training data", INPUT_TRAIN_FILE_PATH_ABS)
+        encode_and_save_data(tokenizer, input_path=INPUT_TRAIN_FILE_PATH_ABS)
+
+        print("encoding training data", INPUT_VAL_FILE_PATH_ABS)
+        if INPUT_VAL_FILE_PATH_ABS is not None:
+            encode_and_save_data(tokenizer,
+                                 input_path=INPUT_VAL_FILE_PATH_ABS,
+                                 output_path=ENCODED_VAL_TOKEN_PATH)
         print("encoding complete")
 
 
