@@ -1,6 +1,8 @@
 import math
 import os
 import pathlib
+import threading
+import time
 from csv import writer
 from datetime import datetime
 from typing import Any, Optional, Callable, Iterable, BinaryIO, IO
@@ -29,9 +31,10 @@ PROJECT_ROOT = SCRIPT_DIR.parent.parent
 
 # ABSTRACTED
 # all files are supposed to be in fixtures
-INPUT_TRAIN_FILE_NAME = "tinystories_sample_5M.txt"
+INPUT_TRAIN_FILE_NAME = "address.txt"
 INPUT_VAL_FILE_NAME = "address.txt"
-BPE_TRAIN_FILE_NAME = "tinystories_sample_5M.txt"
+BPE_TRAIN_FILE_NAME = "address.txt"
+
 
 # file paths
 FIXTURES_PATH = PROJECT_ROOT / "tests" / "fixtures"
@@ -94,7 +97,15 @@ NUM_HEADS = 16
 D_FF = 1344
 ROPE_THETA = 10000.0
 
-
+STOP_GPU_BURN = False
+def burn_gpu():
+    device = DEVICE
+    print(f"Dummy GPU running on {device}")
+    while not STOP_GPU_BURN:
+        x = torch.randn(1024, 1024, device=device)
+        _ = x @ x
+        time.sleep(0.1)
+    print("GPU burn thread stopped")
 
 
 def tokenizer_training():
@@ -150,6 +161,7 @@ def encode_and_save_data(
 
     token_array = np.array(all_tokens, dtype=np.int32)
     np.save(output_path, token_array)
+    print("Saved at location", output_path)
 
 def get_validation_loss(model, val_data, num_batches=1):
     model.eval()
@@ -242,6 +254,8 @@ def main_training_loop(learning_rate,
 
 if __name__ == '__main__':
     if ENCODE_CORPUS:
+        gpu_thread = threading.Thread(target=burn_gpu)
+        gpu_thread.start()
         print("training tokenizer")
         tokenizer = tokenizer_training()
         print("encoding corpus")
@@ -255,6 +269,8 @@ if __name__ == '__main__':
                                  input_path=INPUT_VAL_FILE_PATH_ABS,
                                  output_path=ENCODED_VAL_TOKEN_PATH)
         print("encoding complete")
+        stop_gpu_burn = True
+        gpu_thread.join()
 
 
 
