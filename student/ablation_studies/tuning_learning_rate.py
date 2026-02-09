@@ -100,11 +100,17 @@ ROPE_THETA = 10000.0
 STOP_GPU_BURN = False
 def burn_gpu():
     device = DEVICE
-    print(f"Dummy GPU running on {device}")
+    print(f"Heavy dummy GPU running on {device}")
+
     while not STOP_GPU_BURN:
-        x = torch.randn(1024, 1024, device=device)
-        _ = x @ x
-        time.sleep(0.1)
+        for _ in range(10):
+            x = torch.randn(2048, 2048, device=device)
+            y = x @ x
+            z = y * 0.5
+        if device == "cuda":
+            torch.cuda.synchronize()
+        time.sleep(0.01)
+
     print("GPU burn thread stopped")
 
 
