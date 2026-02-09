@@ -13,6 +13,7 @@ import random
 from einops import rearrange
 from jaxtyping import Bool, Float, Int
 from tqdm import tqdm
+from multiprocessing import Pool
 
 import student.bpe_trainer_sec_one as bpe_trainer_sec_one
 from student.pretokenization_example import find_chunk_boundaries
@@ -28,13 +29,15 @@ PROJECT_ROOT = SCRIPT_DIR.parent.parent
 
 # ABSTRACTED
 # all files are supposed to be in fixtures
-INPUT_TRAIN_FILE_NAME = "tinystories_sample.txt"
+INPUT_TRAIN_FILE_NAME = "tinystories_sample_5M.txt"
 INPUT_VAL_FILE_NAME = "address.txt"
+BPE_TRAIN_FILE_NAME = "tinystories_sample_5M.txt"
 
 # file paths
 FIXTURES_PATH = PROJECT_ROOT / "tests" / "fixtures"
 INPUT_TRAIN_FILE_PATH_ABS = f"{FIXTURES_PATH}/{INPUT_TRAIN_FILE_NAME}"
 INPUT_VAL_FILE_PATH_ABS = f"{FIXTURES_PATH}/{INPUT_VAL_FILE_NAME}"
+BPE_TRAIN_FILE_PATH_ABS = f"{FIXTURES_PATH}/{BPE_TRAIN_FILE_NAME}"
 
 ENCODED_TOKEN_PATH = str(SCRIPT_DIR / "encoded_tokens.npy")
 ENCODED_VAL_TOKEN_PATH = str(SCRIPT_DIR / "encoded_val_tokens.npy")
@@ -75,6 +78,7 @@ print("Running SESSION:", SESSION_ID)
 betas=(0.9, 0.999)
 weight_decay = 0.01
 
+CHUNKING_PROCESS_COUNT = 10
 CHUNKING_NUM_PROCESSES = 2000
 VOCAB_LENGTH = 10000
 SPECIAL_TOKENS = ["<|endoftext|>"]
@@ -93,24 +97,10 @@ ROPE_THETA = 10000.0
 
 
 
-# LOGGER
-file_path = f"{LOGGER_FOLDER}/tuning_learning_rate_{SESSION_ID}.csv"
-if not os.path.isfile(file_path):
-    # Create an empty file
-    logger_file = open(file_path, 'w')
-    print("file created at", file_path)
-else:
-    res=input("File already exists, delete it [y,n]?")
-    if res == 'y':
-        os.remove(file_path)
-    logger_file = open(file_path, 'w')
-
-logger_csv_writer = writer(logger_file)
-
-
 def tokenizer_training():
+    print("Training BPE on", BPE_TRAIN_FILE_PATH_ABS)
     vocab, merges = bpe_trainer_sec_one.run_train_bpe_util(
-        INPUT_TRAIN_FILE_PATH_ABS,
+        BPE_TRAIN_FILE_PATH_ABS,
         VOCAB_LENGTH,
         SPECIAL_TOKENS
     )
@@ -120,29 +110,45 @@ def tokenizer_training():
 
     return tokenizer
 
+
+def encode_chunk(args):
+    start, end, input_path, vocab, merges, special_tokens = args
+
+    tokenizer = bpe_trainer_sec_one.get_tokenizer_util(vocab, merges, special_tokens)
+
+    with open(input_path, "rb") as file:
+        file.seek(start)
+        chunk = file.read(end - start).decode("utf-8", errors="ignore")
+        encoding = tokenizer.encode(chunk)
+
+    return encoding
+
 def encode_and_save_data(
         tokenizer: bpe_trainer_sec_one.Tokenizer,
         input_path=INPUT_TRAIN_FILE_PATH_ABS,
-        output_path=ENCODED_TOKEN_PATH
+        output_path=ENCODED_TOKEN_PATH,
+        num_chunks=CHUNKING_NUM_PROCESSES,
+        num_processes=CHUNKING_PROCESS_COUNT
 ):
     file = open(input_path, "rb")
-    boundaries = find_chunk_boundaries(file, CHUNKING_NUM_PROCESSES, b"<|endoftext|>")
+    boundaries = find_chunk_boundaries(file, num_chunks, b"<|endoftext|>")
+    file.close()
+
+    vocab = tokenizer.vocab
+    merges = tokenizer.merges
+    special_tokens = SPECIAL_TOKENS
+
+    args_list = [
+        (start, end, input_path, vocab, merges, special_tokens)
+        for start, end in zip(boundaries[:-1], boundaries[1:])
+    ]
 
     all_tokens = []
-
-    # taken from profs code:
-    # The following is a serial implementation, but you can parallelize this
-    # by sending each start/end pair to a set of processes.
-    for start, end in tqdm(list(zip(boundaries[:-1], boundaries[1:]))):
-        file.seek(start)
-        chunk = file.read(end - start).decode("utf-8", errors="ignore")
-        # print("chunk", chunk)
-        encoding = tokenizer.encode(chunk)
-        # print("encoding", encoding)
-        all_tokens.extend(encoding)
+    with Pool(processes=num_processes) as pool:
+        for encoding in tqdm(pool.imap(encode_chunk, args_list), total=len(args_list)):
+            all_tokens.extend(encoding)
 
     token_array = np.array(all_tokens, dtype=np.int32)
-
     np.save(output_path, token_array)
 
 def get_validation_loss(model, val_data, num_batches=1):
@@ -166,6 +172,22 @@ def main_training_loop(learning_rate,
                        train_encoded_token_path=ENCODED_TOKEN_PATH,
                        val_encoded_token_path=None
                        ):
+    # LOGGER
+    file_path = f"{LOGGER_FOLDER}/tuning_learning_rate_{SESSION_ID}.csv"
+    if not os.path.isfile(file_path):
+        # Create an empty file
+        logger_file = open(file_path, 'w')
+        print("file created at", file_path)
+    else:
+        res = input("File already exists, delete it [y,n]?")
+        if res == 'y':
+            os.remove(file_path)
+        logger_file = open(file_path, 'w')
+
+    logger_csv_writer = writer(logger_file)
+
+
+
     train_data = np.load(train_encoded_token_path, mmap_mode='r')
     val_data = np.load(val_encoded_token_path, mmap_mode='r') if val_encoded_token_path else None
 
