@@ -172,12 +172,21 @@ def get_pre_tokens(input_path: str | os.PathLike, special_tokens: list[str]):
         chunk = file.read(end - start).decode("utf-8", errors="ignore")
         # Run pre-tokenization on your chunk and store the counts for each pre-token
 
-        for special_token in special_tokens:
-            chunk = chunk.replace(special_token, "")
+        if special_tokens:
+            escaped_tokens = [re.escape(token) for token in special_tokens]
+            split_pattern = '|'.join(escaped_tokens)
+            text_segments = re.split(split_pattern, chunk)
+        else:
+            text_segments = [chunk]
 
-        for token in re.finditer(PAT, chunk):
-            token_bytes_tuple = tuple(bytes([b]) for b in token.group().encode("utf-8"))
-            frequency_table[token_bytes_tuple] += 1
+        for segment in text_segments:
+            if not segment:
+                continue
+
+            for token in re.finditer(PAT, segment):
+                token_bytes_tuple = tuple(bytes([b]) for b in token.group().encode("utf-8"))
+                frequency_table[token_bytes_tuple] += 1
+
 
     return frequency_table
 
@@ -190,7 +199,7 @@ def get_most_frequent_pair(pair_frequency_table):
     return max([[pair_frequency_table[key], key] for key in pair_frequency_table])[1]
 
 
-def merge_pairs(mergable_pair, frequency_table):
+def merge_pairs(mergable_pair, frequency_table, special_tokens_set):
     new_val = mergable_pair[0] + mergable_pair[1]
     merges = []
     new_keys = []
@@ -201,7 +210,9 @@ def merge_pairs(mergable_pair, frequency_table):
         while i < len(key):
             if i + 1 < len(key):
                 pair = (key[i], key[i + 1])
-                if mergable_pair == pair:
+                if (pair == mergable_pair and
+                        key[i] not in special_tokens_set and
+                        key[i + 1] not in special_tokens_set):
                     new_key.append(new_val)
                     i += 2
                     continue
@@ -229,17 +240,18 @@ def run_train_bpe_util(
     frequency_table = get_pre_tokens(input_path, special_tokens)
     # print("Frequency table:", frequency_table)
 
+    special_tokens_bytes = {token.encode('utf-8') for token in special_tokens}
+
     merges = []
+
+    pair_frequency_table = defaultdict(lambda: 0)
+    for key in frequency_table:
+        for i in range(0, len(key) - 1):
+            if key[i] not in special_tokens_bytes and key[i + 1] not in special_tokens_bytes:
+                pair_frequency_table[(key[i], key[i + 1])] += frequency_table[key]
 
     # one iteration
     while len(vocabulary) < vocab_size:
-        # make pairs
-        pair_frequency_table = defaultdict(lambda: 0)
-        for key in frequency_table:
-            for i in range(0, len(key) - 1):
-                pair_frequency_table[(key[i], key[i + 1])] += frequency_table[key]
-
-        # print("Pair frequencies:", pair_frequency_table)
         if len(pair_frequency_table) == 0:
             break
 
@@ -248,11 +260,46 @@ def run_train_bpe_util(
         merges.append(mergable_pair)
         # print("Mergable pair:", mergable_pair)
 
-        frequency_table = merge_pairs(mergable_pair, frequency_table)
-        # print("new Frequency table:", frequency_table)
+        new_val = mergable_pair[0] + mergable_pair[1]
+        new_frequency_table = defaultdict(lambda: 0)
+
+        for key in frequency_table:
+            i = 0
+            new_key = []
+
+            while i < len(key):
+                if i + 1 < len(key):
+                    pair = (key[i], key[i + 1])
+                    if (pair == mergable_pair and
+                            key[i] not in special_tokens_bytes and
+                            key[i + 1] not in special_tokens_bytes):
+                        new_key.append(new_val)
+                        i += 2
+                        continue
+                new_key.append(key[i])
+                i += 1
+
+            new_key_tuple = tuple(new_key)
+            new_frequency_table[new_key_tuple] += frequency_table[key]
+
+            if key != new_key_tuple:
+                for i in range(len(key) - 1):
+                    old_pair = (key[i], key[i + 1])
+                    if (key[i] not in special_tokens_bytes and
+                            key[i + 1] not in special_tokens_bytes):
+                        pair_frequency_table[old_pair] -= frequency_table[key]
+                        if pair_frequency_table[old_pair] <= 0:
+                            del pair_frequency_table[old_pair]
+
+                for i in range(len(new_key_tuple) - 1):
+                    new_pair = (new_key_tuple[i], new_key_tuple[i + 1])
+                    if (new_key_tuple[i] not in special_tokens_bytes and
+                            new_key_tuple[i + 1] not in special_tokens_bytes):
+                        pair_frequency_table[new_pair] += frequency_table[key]
+
+        frequency_table = new_frequency_table
 
         new_id = len(vocabulary)
-        new_val = mergable_pair[0] + mergable_pair[1]
         vocabulary[new_id] = new_val
 
         # print("Vocabulary size", len(vocabulary))

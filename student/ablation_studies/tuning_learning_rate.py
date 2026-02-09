@@ -1,3 +1,4 @@
+import json
 import math
 import os
 import pathlib
@@ -31,9 +32,9 @@ PROJECT_ROOT = SCRIPT_DIR.parent.parent
 
 # ABSTRACTED
 # all files are supposed to be in fixtures
-INPUT_TRAIN_FILE_NAME = "address.txt"
-INPUT_VAL_FILE_NAME = "address.txt"
-BPE_TRAIN_FILE_NAME = "address.txt"
+INPUT_TRAIN_FILE_NAME = "TinyStoriesV2-GPT4-train.txt"
+INPUT_VAL_FILE_NAME = "TinyStoriesV2-GPT4-valid.txt"
+BPE_TRAIN_FILE_NAME = "TinyStoriesV2-GPT4-train.txt"
 
 
 # file paths
@@ -46,6 +47,8 @@ ENCODED_TOKEN_PATH = str(SCRIPT_DIR / "encoded_tokens.npy")
 ENCODED_VAL_TOKEN_PATH = str(SCRIPT_DIR / "encoded_val_tokens.npy")
 CHECKPOINT_FOLDER = str(SCRIPT_DIR / "checkpoints")
 LOGGER_FOLDER = str(SCRIPT_DIR / "loss_logs")
+VOCAB_SAVE_FILE = str(SCRIPT_DIR / "vocab_save.json")
+MERGES_SAVE_FILE = str(SCRIPT_DIR / "merges_save.json")
 
 # ===
 BATCH_SIZE = 128
@@ -114,7 +117,7 @@ def burn_gpu():
     print("GPU burn thread stopped")
 
 
-def tokenizer_training():
+def tokenizer_training(vocab_path=VOCAB_SAVE_FILE, merge_path=MERGES_SAVE_FILE):
     print("Training BPE on", BPE_TRAIN_FILE_PATH_ABS)
     vocab, merges = bpe_trainer_sec_one.run_train_bpe_util(
         BPE_TRAIN_FILE_PATH_ABS,
@@ -124,6 +127,16 @@ def tokenizer_training():
 
     # TODO: Probably can save it
     tokenizer = bpe_trainer_sec_one.get_tokenizer_util(vocab, merges, SPECIAL_TOKENS)
+
+    with open(vocab_path, "w", encoding="utf-8") as f:
+        json.dump(vocab, f, ensure_ascii=False, indent=2)
+
+    with open(merge_path, "w", encoding="utf-8") as f:
+        for merge in merges:
+            if isinstance(merge, (tuple, list)) and len(merge) == 2:
+                f.write(f"{merge[0]} {merge[1]}\n")
+            else:
+                f.write(str(merge) + "\n")
 
     return tokenizer
 
@@ -285,4 +298,4 @@ if __name__ == '__main__':
     # while learning_rate <= learning_rate_max:
     #     main_training_loop(learning_rate)
 
-    main_training_loop(learning_rate, val_encoded_token_path=ENCODED_VAL_TOKEN_PATH)
+    # main_training_loop(learning_rate, val_encoded_token_path=ENCODED_VAL_TOKEN_PATH)
