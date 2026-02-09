@@ -72,7 +72,7 @@ def run_gradient_clipping_util(parameters: Iterable[torch.nn.Parameter], max_l2_
     for parameter in parameters:
         if parameter.grad is None:
             continue
-        print("parameter grad", parameter.grad, "norm", parameter.grad.norm(2))
+        # print("parameter grad", parameter.grad, "norm", parameter.grad.norm(2))
         total_sqr += parameter.grad.norm(2).item() ** 2
 
     l2_norm = total_sqr ** 0.5
