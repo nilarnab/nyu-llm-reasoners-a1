@@ -15,8 +15,15 @@ class Tokenizer:
         if special_tokens is None:
             special_tokens = []
         self.vocab = vocab
+        self.reverse_vocab = {}
         self.merges = merges
         self.special_tokens = special_tokens
+        self._make_reverse_vocab()
+
+
+    def _make_reverse_vocab(self):
+        for key in self.vocab:
+            self.reverse_vocab[self.vocab[key]] = key
 
     def from_files(self, vocab_filepath, merges_filepath, special_tokens=None):
         pass
@@ -120,9 +127,11 @@ class Tokenizer:
 
 
     def _token_to_id(self, token):
-        for token_id in self.vocab:
-            if token == self.vocab[token_id]:
-                return token_id
+        if token in self.reverse_vocab:
+            return self.reverse_vocab[token]
+        # for token_id in self.vocab:
+        #     if token == self.vocab[token_id]:
+        #         return token_id
         # print("problem with token", token)
         raise Exception(f"No token id found for given token: {token} in the vocab")
 
@@ -235,6 +244,7 @@ def run_train_bpe_util(
             **kwargs,
     ) -> tuple[dict[int, bytes], list[tuple[bytes, bytes]]]:
     vocabulary = init_vocab(special_tokens)
+
     # print("Base vocabulary:", vocabulary)
     # print("base vocabulary size", len(vocabulary))
     frequency_table = get_pre_tokens(input_path, special_tokens)
@@ -242,65 +252,75 @@ def run_train_bpe_util(
 
     special_tokens_bytes = {token.encode('utf-8') for token in special_tokens}
 
+    pair_frequency_table = defaultdict(lambda: 0)
+    pair_index = defaultdict(set)
+
+    for key in frequency_table:
+        for i in range(len(key) - 1):
+            a, b = key[i], key[i + 1]
+            if a in special_tokens_bytes or b in special_tokens_bytes:
+                continue
+            pair = (a, b)
+            pair_frequency_table[pair] += frequency_table[key]
+            pair_index[pair].add(key)
+
     merges = []
 
-    pair_frequency_table = defaultdict(lambda: 0)
-    for key in frequency_table:
-        for i in range(0, len(key) - 1):
-            if key[i] not in special_tokens_bytes and key[i + 1] not in special_tokens_bytes:
-                pair_frequency_table[(key[i], key[i + 1])] += frequency_table[key]
+    if pair_frequency_table:
+        max_pair = max(pair_frequency_table.items(), key=lambda x: (x[1], x[0]))[0]
+    else:
+        max_pair = None
 
     # one iteration
-    while len(vocabulary) < vocab_size:
-        if len(pair_frequency_table) == 0:
-            break
+    while len(vocabulary) < vocab_size and max_pair is not None:
 
         # decide which pair to merge
-        mergable_pair = get_most_frequent_pair(pair_frequency_table)
+        mergable_pair = max_pair
         merges.append(mergable_pair)
+        new_token = mergable_pair[0] + mergable_pair[1]
         # print("Mergable pair:", mergable_pair)
 
-        new_val = mergable_pair[0] + mergable_pair[1]
-        new_frequency_table = defaultdict(lambda: 0)
-
-        for key in frequency_table:
-            i = 0
+        affected_keys = list(pair_index[mergable_pair])
+        for key in affected_keys:
+            count = frequency_table[key]
             new_key = []
-
+            i = 0
             while i < len(key):
-                if i + 1 < len(key):
-                    pair = (key[i], key[i + 1])
-                    if (pair == mergable_pair and
-                            key[i] not in special_tokens_bytes and
-                            key[i + 1] not in special_tokens_bytes):
-                        new_key.append(new_val)
-                        i += 2
-                        continue
-                new_key.append(key[i])
-                i += 1
-
+                if i + 1 < len(key) and (key[i], key[i + 1]) == mergable_pair:
+                    new_key.append(new_token)
+                    i += 2
+                else:
+                    new_key.append(key[i])
+                    i += 1
             new_key_tuple = tuple(new_key)
-            new_frequency_table[new_key_tuple] += frequency_table[key]
 
-            if key != new_key_tuple:
-                for i in range(len(key) - 1):
-                    old_pair = (key[i], key[i + 1])
-                    if (key[i] not in special_tokens_bytes and
-                            key[i + 1] not in special_tokens_bytes):
-                        pair_frequency_table[old_pair] -= frequency_table[key]
-                        if pair_frequency_table[old_pair] <= 0:
-                            del pair_frequency_table[old_pair]
+            frequency_table[new_key_tuple] = frequency_table.pop(key)
 
-                for i in range(len(new_key_tuple) - 1):
-                    new_pair = (new_key_tuple[i], new_key_tuple[i + 1])
-                    if (new_key_tuple[i] not in special_tokens_bytes and
-                            new_key_tuple[i + 1] not in special_tokens_bytes):
-                        pair_frequency_table[new_pair] += frequency_table[key]
+            for i in range(len(key) - 1):
+                old_pair = (key[i], key[i + 1])
+                if old_pair in pair_frequency_table:
+                    pair_frequency_table[old_pair] -= count
+                    pair_index[old_pair].discard(key)
+                    if pair_frequency_table[old_pair] <= 0:
+                        del pair_frequency_table[old_pair]
+                        del pair_index[old_pair]
 
-        frequency_table = new_frequency_table
+            for i in range(len(new_key_tuple) - 1):
+                a, b = new_key_tuple[i], new_key_tuple[i + 1]
+                if a in special_tokens_bytes or b in special_tokens_bytes:
+                    continue
+                pair = (a, b)
+                pair_frequency_table[pair] += count
+                pair_index[pair].add(new_key_tuple)
+
 
         new_id = len(vocabulary)
-        vocabulary[new_id] = new_val
+        vocabulary[new_id] = new_token
+        if pair_frequency_table:
+            max_pair = max(pair_frequency_table.items(), key=lambda x: (x[1], x[0]))
+            max_pair = max_pair[0]
+        else:
+            max_pair = None
 
         # print("Vocabulary size", len(vocabulary))
 

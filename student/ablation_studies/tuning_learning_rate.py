@@ -34,7 +34,7 @@ PROJECT_ROOT = SCRIPT_DIR.parent.parent
 # all files are supposed to be in fixtures
 INPUT_TRAIN_FILE_NAME = "TinyStoriesV2-GPT4-train.txt"
 INPUT_VAL_FILE_NAME = "TinyStoriesV2-GPT4-valid.txt"
-BPE_TRAIN_FILE_NAME = "address.txt"
+BPE_TRAIN_FILE_NAME = "TinyStoriesV2-GPT4-train.txt"
 
 
 # file paths
