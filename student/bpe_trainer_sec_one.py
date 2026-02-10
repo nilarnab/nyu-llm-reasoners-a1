@@ -1,9 +1,12 @@
 import os
+from multiprocessing import Pool
 from typing import Iterable, Iterator
 
 import regex as re
 from collections import defaultdict
 from student.pretokenization_example import find_chunk_boundaries
+from functools import lru_cache
+
 # from pretokenization_example import find_chunk_boundaries
 
 PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
@@ -20,6 +23,48 @@ class Tokenizer:
         self.special_tokens = special_tokens
         self._make_reverse_vocab()
 
+        self.merge_ranks = {
+            merge: i for i, merge in enumerate(self.merges)
+        }
+
+        if self.special_tokens:
+            self.special_tokens = sorted(self.special_tokens, key=len, reverse=True)
+            self.special_regex = re.compile(
+                '(' + '|'.join(re.escape(st) for st in self.special_tokens) + ')'
+            )
+        else:
+            self.special_regex = None
+
+    def _bpe_merge(self, token):
+        token = list(token)
+
+        while True:
+            best_rank = None
+            best_pair = None
+
+            for i in range(len(token) - 1):
+                pair = (token[i], token[i + 1])
+                rank = self.merge_ranks.get(pair)
+                if rank is not None and (best_rank is None or rank < best_rank):
+                    best_rank = rank
+                    best_pair = pair
+
+            if best_pair is None:
+                break
+
+            new_token = []
+            i = 0
+            while i < len(token):
+                if i + 1 < len(token) and (token[i], token[i + 1]) == best_pair:
+                    new_token.append(token[i] + token[i + 1])
+                    i += 2
+                else:
+                    new_token.append(token[i])
+                    i += 1
+
+            token = new_token
+
+        return tuple(token)
 
     def _make_reverse_vocab(self):
         for key in self.vocab:
@@ -62,25 +107,8 @@ class Tokenizer:
 
                 new_pre_tokens = []
                 for token_raw in pre_tokens:
-                    token = [el for el in token_raw]
-                    for merge in self.merges:
-                    # for merge in []:
-                        i = 0
-                        new_token = []
-                        while i < len(token):
-                            if i + 1 < len(token):
-                                pair = (token[i], token[i + 1])
-                                if pair == merge:
-                                    # print("merging", pair)
-                                    new_token_sub = merge[0] + merge[1]
-                                    new_token.append(new_token_sub)
-                                    i += 2
-                                    continue
-
-                            new_token.append(token[i])
-                            i += 1
-                        token = [el for el in new_token]
-                    new_pre_tokens.append(tuple(token))
+                    merged = self._bpe_cache(token_raw)
+                    new_pre_tokens.append(merged)
 
                 # print("new pre tokens:", new_pre_tokens)
 
@@ -93,7 +121,9 @@ class Tokenizer:
 
         return res
 
-
+    @lru_cache(maxsize=100_000)
+    def _bpe_cache(self, token):
+        return self._bpe_merge(token)
 
     def decode(self, ids: list[int]):
         res = ""
@@ -165,38 +195,54 @@ def init_vocab(special_tokens: list[str]) -> dict[int, bytes]:
     return vocab
 
 
-def get_pre_tokens(input_path: str | os.PathLike, special_tokens: list[str]):
-    # TODO: not sure, whether pretokens are the frequency table or the list of bytes-tuples ?
-    file = open(input_path, "rb")
-    frequency_table = defaultdict(lambda: 0)
+# pre tokens
+def pre_token_chunk(args):
+    start, end, input_path, special_tokens = args
+    frequency_table = defaultdict(int)
 
-    num_processes = 4
-    boundaries = find_chunk_boundaries(file, num_processes, b"<|endoftext|>")
-
-    # taken from profs code:
-    # The following is a serial implementation, but you can parallelize this
-    # by sending each start/end pair to a set of processes.
-    for start, end in zip(boundaries[:-1], boundaries[1:]):
+    with open(input_path, "rb") as file:
         file.seek(start)
         chunk = file.read(end - start).decode("utf-8", errors="ignore")
-        # Run pre-tokenization on your chunk and store the counts for each pre-token
 
-        if special_tokens:
-            escaped_tokens = [re.escape(token) for token in special_tokens]
-            split_pattern = '|'.join(escaped_tokens)
-            text_segments = re.split(split_pattern, chunk)
-        else:
-            text_segments = [chunk]
+    if special_tokens:
+        escaped_tokens = [re.escape(token) for token in special_tokens]
+        split_pattern = '|'.join(escaped_tokens)
+        text_segments = re.split(split_pattern, chunk)
+    else:
+        text_segments = [chunk]
 
-        for segment in text_segments:
-            if not segment:
-                continue
+    for segment in text_segments:
+        if not segment:
+            continue
+        for token in re.finditer(PAT, segment):
+            token_bytes_tuple = tuple(bytes([b]) for b in token.group().encode("utf-8"))
+            frequency_table[token_bytes_tuple] += 1
 
-            for token in re.finditer(PAT, segment):
-                token_bytes_tuple = tuple(bytes([b]) for b in token.group().encode("utf-8"))
-                frequency_table[token_bytes_tuple] += 1
+    return frequency_table
 
 
+def merge_frequency_tables(tables):
+    result = defaultdict(int)
+    for table in tables:
+        for key, count in table.items():
+            result[key] += count
+    return result
+
+
+def get_pre_tokens(input_path, special_tokens, num_processes=8):
+    frequency_table = defaultdict(int)
+
+    with open(input_path, "rb") as f:
+        boundaries = find_chunk_boundaries(f, num_processes*4, b"<|endoftext|>")
+
+    args_list = [(start, end, input_path, special_tokens)
+                 for start, end in zip(boundaries[:-1], boundaries[1:])]
+
+    with Pool(processes=num_processes) as pool:
+        results = pool.map(pre_token_chunk, args_list)
+
+    # merge frequency tables
+    frequency_table = merge_frequency_tables(results)
     return frequency_table
 
 # def run_train_bpe_one_iteration(
@@ -326,10 +372,13 @@ def run_train_bpe_util(
 
     return vocabulary, merges
 
+# starting 1:35
 # =====
 
 # i am getting (b'i', b'n') -> 585
 # reference first merge (b' ', b't'),
+
+
 
 # if __name__ == "__main__":
     # run_train_bpe_util(input_path="/Users/nilarnabdebnath/Documents/course_work/sem2/llm_reasoners/assignment1/nyu-llm-reasoners-a1/student/assets/test_corpus", vocab_size=258, special_tokens=["<|endoftext|>"])
