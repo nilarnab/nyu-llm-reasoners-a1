@@ -56,8 +56,8 @@ CONTEXT_LENGTH = 256
 ITERATIONS = 10000
 
 # ====
-SAVE_CHECK_POINT_ITERATION = 10
-FIND_VAL_LOSS_ITERATION=1
+SAVE_CHECK_POINT_ITERATION = 100
+FIND_VAL_LOSS_ITERATION=100
 
 if torch.cuda.is_available():
     print("device set to CUDA")
@@ -90,7 +90,7 @@ VOCAB_LENGTH = 10000
 SPECIAL_TOKENS = ["<|endoftext|>"]
 
 # TRAINING MODE
-ENCODE_CORPUS = True
+ENCODE_CORPUS = False
 
 # MODEL ARCCHITECTURE CONTROL
 D_MODEL = 512
@@ -100,7 +100,7 @@ NUM_HEADS = 16
 D_FF = 1344
 ROPE_THETA = 10000.0
 
-STOP_GPU_BURN = False
+STOP_GPU_BURN = True
 def burn_gpu():
     device = DEVICE
     print(f"Heavy dummy GPU running on {device}")
@@ -217,7 +217,7 @@ def main_training_loop(learning_rate,
                        val_encoded_token_path=None
                        ):
     # LOGGER
-    file_path = f"{LOGGER_FOLDER}/tuning_learning_rate_{SESSION_ID}.csv"
+    file_path = f"{LOGGER_FOLDER}/tuning_learning_rate{str(learning_rate).replace(".", "_")}_{SESSION_ID}.csv"
     if not os.path.isfile(file_path):
         # Create an empty file
         logger_file = open(file_path, 'w')
@@ -306,9 +306,12 @@ if __name__ == '__main__':
 
 
 
-    learning_rate = 10**-3
+    learning_rate = 10**-9
     learning_rate_max = 1
-    # while learning_rate <= learning_rate_max:
-    #     main_training_loop(learning_rate)
+    while learning_rate <= learning_rate_max:
+        print("LEARNING RATE", learning_rate)
+        main_training_loop(learning_rate, val_encoded_token_path=ENCODED_VAL_TOKEN_PATH)
+        learning_rate = learning_rate * 10
+
 
     # main_training_loop(learning_rate, val_encoded_token_path=ENCODED_VAL_TOKEN_PATH)

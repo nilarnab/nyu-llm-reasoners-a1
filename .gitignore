@@ -167,3 +167,6 @@ student/ablation_studies/checkpoints
 
 tests/fixtures/TinyStoriesV2-GPT4-train.txt
 tests/fixtures/TinyStoriesV2-GPT4-valid.txt
+
+student/ablation_studies/encoded_tokens.npy
+student/ablation_studies/encoded_val_tokens.npy
