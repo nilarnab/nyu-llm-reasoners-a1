@@ -244,7 +244,9 @@ def main_training_loop(learning_rate,
         d_ff=int(D_FF), # TODO: NEED to allow float as well
         rope_theta=ROPE_THETA,
         weights=None,
+        device=DEVICE
     )
+    model.to(DEVICE)
     print("model initialized")
     optimizer = get_adamw_cls()(
         model.parameters(),
@@ -254,31 +256,79 @@ def main_training_loop(learning_rate,
         eps=1e-8,
     )
 
+    use_cuda_amp = (DEVICE == "cuda")
+
+    if use_cuda_amp:
+        scaler = torch.cuda.amp.GradScaler()
+    else:
+        scaler = None
+
     for it_id in tqdm(range(ITERATIONS)):
         input_tensor, target_tensor = data_loader(train_data, BATCH_SIZE, CONTEXT_LENGTH, DEVICE)
         # print("input shape", input_tensor.shape)
-        logits = model(input_tensor)
-        loss = run_cross_entropy_util(logits, target_tensor, DEVICE)
-
-        train_loss_val = loss.item()
-        print(">> LOSS", loss.item())
-
         optimizer.zero_grad()
-        loss.backward()
-        run_gradient_clipping_util(model.parameters(), max_l2_norm=1.0)
-        optimizer.step()
+
+        if use_cuda_amp:
+            with torch.cuda.amp.autocast():
+                logits = model(input_tensor)
+                loss = run_cross_entropy_util(logits, target_tensor, DEVICE)
+
+            train_loss_val = loss.item()
+
+            scaler.scale(loss).backward()
+
+            scaler.unscale_(optimizer)
+            run_gradient_clipping_util(
+                model.parameters(), max_l2_norm=1.0
+            )
+
+            scaler.step(optimizer)
+            scaler.update()
+
+        else:
+            logits = model(input_tensor)
+            loss = run_cross_entropy_util(logits, target_tensor, DEVICE)
+
+            train_loss_val = loss.item()
+
+            loss.backward()
+            run_gradient_clipping_util(
+                model.parameters(), max_l2_norm=1.0
+            )
+            optimizer.step()
+
+        # loss = run_cross_entropy_util(logits, target_tensor, DEVICE)
+        #
+        # train_loss_val = loss.item()
+        #
+        #
+        # loss.backward()
+        # run_gradient_clipping_util(model.parameters(), max_l2_norm=1.0)
+        # optimizer.step()
 
         # validation loss calculation
-        if val_data is not None:
-            if it_id % FIND_VAL_LOSS_ITERATION == 0:
-                validation_loss = get_validation_loss(model, val_data, 1)
-                logger_csv_writer.writerow([it_id, train_loss_val, validation_loss])
-            else:
-                logger_csv_writer.writerow([it_id, train_loss_val, '_'])
+        if val_data is not None and it_id % FIND_VAL_LOSS_ITERATION == 0:
+            validation_loss = get_validation_loss(model, val_data, 1)
+            print(">> LOSS", train_loss_val, validation_loss)
+            logger_csv_writer.writerow(
+                [it_id, train_loss_val, validation_loss]
+            )
+            logger_file.flush()
         else:
-            logger_csv_writer.writerow([it_id, train_loss_val, '_'])
+            logger_csv_writer.writerow(
+                [it_id, train_loss_val, "_"]
+            )
+        # if val_data is not None:
+        #     if it_id % FIND_VAL_LOSS_ITERATION == 0:
+        #         print(">> LOSS", loss.item())
+        #         validation_loss = get_validation_loss(model, val_data, 1)
+        #         logger_csv_writer.writerow([it_id, train_loss_val, validation_loss])
+        #     else:
+        #         logger_csv_writer.writerow([it_id, train_loss_val, '_'])
+        # else:
+        #     logger_csv_writer.writerow([it_id, train_loss_val, '_'])
 
-        logger_file.flush()
+
 
         # checkpoint saving
         if it_id % SAVE_CHECK_POINT_ITERATION == 0:

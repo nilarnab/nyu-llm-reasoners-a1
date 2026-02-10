@@ -55,13 +55,17 @@ class Embedding(torch.nn.Module):
         super().__init__(*args, **kwargs)
         self.num_embeddings = num_embeddings
         self.embedding_dim = embedding_dim
-        self.weights = self._init_weights(weights)
+        self.weights = None
         self.device = device
         self.dtype = dtype
+        self.weights = self._init_weights(weights)
 
     def _init_weights(self, weight_tensor : torch.Tensor = None):
         if weight_tensor is None:
-            weight_tensor = torch.randn(self.num_embeddings, self.embedding_dim)
+            weight_tensor = torch.randn(
+                self.num_embeddings,
+                self.embedding_dim,
+                device=self.device)
             sigma = (2 / (self.num_embeddings + self.embedding_dim)) ** 0.5
 
             torch.nn.init.trunc_normal_(weight_tensor, 0, sigma, -3*sigma, 3*sigma)
@@ -74,6 +78,7 @@ class Embedding(torch.nn.Module):
         # print("embedding dim", self.embedding_dim)
         # print('token idds shape', token_ids.shape)
         # print("token ids", token_ids)
+        token_ids.to(self.weights.device)
 
         return self.weights[token_ids]
 
@@ -92,7 +97,7 @@ class RMSNorm(torch.nn.Module):
 
     def _init_weights(self, weights):
         if weights is None:
-            return torch.nn.Parameter(torch.ones(self.d_model)) #TODO: have to review how it is done
+            return torch.nn.Parameter(torch.ones(self.d_model, device=self.device)) #TODO: have to review how it is done
         return torch.nn.Parameter(weights)
 
     def forward(self, x : torch.Tensor):
@@ -183,53 +188,35 @@ class RotaryPositionalEmbedding:
         self.device = device
 
     def forward(self, x: torch.Tensor, token_positions: torch.Tensor) -> torch.Tensor:
-        # TODO: understand all of the transformations and the reasons for rearraning
+        x = x.to(self.device)
+        token_positions = token_positions.to(self.device)
+
         THETA = self.theta
-        # print('x shape', x.shape)
-        # print("token_positions", token_positions.shape)
-
         x_pair = rearrange(x,'... (c d) -> ... c d', d=2)
-        # print("x pair shape", x_pair.shape)
+        pair_pos = torch.arange(x_pair.shape[-2], device=self.device)
 
-        pair_pos = torch.arange(x_pair.shape[-2])
-        # print("i shape", pair_pos.shape)
-
-        freqs = (1.0/ (THETA ** (2*pair_pos/x.shape[-1])))
-        # print("freqs shape", freqs.shape)
-
-        # theta = token_positions * freqs
-        # # print("theta shape", theta.shape)
+        freqs = (1.0/ (THETA ** (2*pair_pos/x.shape[-1]))).to(self.device)
 
         if token_positions.dim() == 1:
             token_positions = rearrange(token_positions, 'seq -> 1 seq 1')
         else:
             token_positions = rearrange(token_positions, 'batch seq -> batch seq 1')
-        # print("token changed shape", token_positions.shape)
 
-        # freqs = rearrange(freqs, '(a) -> 1 1 a')
         freqs = rearrange(freqs, 'd -> 1 1 d')
-        # print("freqs changed shape", freqs.shape)
-
         theta = token_positions * freqs
-        # print("theta shape", theta.shape)
 
         sins = rearrange(theta.sin(), 'b seq d -> b seq d 1')
         coses = rearrange(theta.cos(), 'b seq d -> b seq d 1')
 
-
-        # print("sins coses shape", sins.shape)
-
         x1 = x_pair[..., 0:1]
         x2 = x_pair[..., 1:2]
 
-        # print("x1 shape", x1.shape)
         x_rotated = torch.cat([x1 * coses - x2 * sins,
                                x1 * sins + x2 * coses], dim=-1)
 
         x_out = rearrange(x_rotated, '... c d -> ... (c d)')
 
         return x_out
-
 
 def scaled_dot_product_attention_util(
         Q: Float[Tensor, " ... queries d_k"],
@@ -329,7 +316,7 @@ class MultiHeadedAttentionRoped(torch.nn.Module):
         # print("q_split shpae", q_split.shape)
 
         d_head = self.d_model // self.num_heads  # Use head dimension, not full d_model!
-        rope_layer = RotaryPositionalEmbedding(self.theta, d_head, self.max_seq_len, in_features.device)
+        rope_layer = RotaryPositionalEmbedding(self.theta, d_head, self.max_seq_len, device=self.device)
         q_split = rope_layer.forward(q_split, token_positions)
         k_split = rope_layer.forward(k_split, token_positions)
         # print("RoPE applied with d_head =", d_head)
@@ -460,22 +447,24 @@ class TransformerBlock(torch.nn.Module):
                  q_proj_weight = None,
                  k_proj_weight = None,
                  v_proj_weight = None,
-                 o_proj_weight = None
-
+                 o_proj_weight = None,
+                 device=None
                  ):
         super().__init__()
         self.d_model = d_model
+        self.device = device
         self.num_heads = num_heads
         self.d_ff = d_ff
         self.max_seq_len = max_seq_len
         self.theta = theta
-        self.rms_layer_1 = RMSNorm(d_model, 1e-5, rms1_weight)
-        self.rms_layer_2 = RMSNorm(d_model, 1e-5, rms2_weight)
-        self.mha_layer = MultiHeadedAttentionRoped(d_model, num_heads, max_seq_len, theta, q_proj_weight, k_proj_weight, v_proj_weight, o_proj_weight)
-        self.pffs_layer = PositionFeedForwardSwigLu(d_model, d_ff, pffs_weight1, pffs_weight2, pffs_weight3)
+        self.rms_layer_1 = RMSNorm(d_model, 1e-5, rms1_weight,device=self.device)
+        self.rms_layer_2 = RMSNorm(d_model, 1e-5, rms2_weight,device=self.device)
+        self.mha_layer = MultiHeadedAttentionRoped(d_model, num_heads, max_seq_len, theta, q_proj_weight, k_proj_weight, v_proj_weight, o_proj_weight,device=self.device)
+        self.pffs_layer = PositionFeedForwardSwigLu(d_model, d_ff, pffs_weight1, pffs_weight2, pffs_weight3,device=self.device)
 
 
     def forward(self, in_features):
+        in_features = in_features.to(self.device)
         rms_val = self.rms_layer_1.forward(in_features)
         mha_roped_val = self.mha_layer.forward(rms_val)
 
@@ -530,7 +519,7 @@ class TransformerLm(torch.nn.Module):
                 k_proj_weight=self.state_dir[f'layers.{i}.attn.k_proj.weight'] if weights is not None else None,
                 v_proj_weight=self.state_dir[f'layers.{i}.attn.v_proj.weight'] if weights is not None else None,
                 o_proj_weight=self.state_dir[f'layers.{i}.attn.output_proj.weight'] if weights is not None else None,
-
+                device=self.device
 
             )
             for i in range(num_layers)

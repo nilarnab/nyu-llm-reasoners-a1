@@ -21,7 +21,7 @@ def decode(model_output, temperature=1):
 
 def data_loader(dataset: npt.NDArray, batch_size: int, context_length: int, device: str
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    original_tensor = torch.Tensor(dataset)
+    original_tensor = torch.Tensor(dataset.copy())
     length = original_tensor.shape[0]
     start_indices = np.random.randint(0, length - context_length, batch_size)
 
