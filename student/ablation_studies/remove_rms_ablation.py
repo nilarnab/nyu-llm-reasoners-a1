@@ -219,7 +219,7 @@ def main_training_loop(learning_rate,
                        val_encoded_token_path=None
                        ):
     # LOGGER
-    file_path = f"{LOGGER_FOLDER}/tuning_learning_rate{str(learning_rate).replace(".", "_")}_{SESSION_ID}.csv"
+    file_path = f"{LOGGER_FOLDER}/tuning_learning_rate{str(learning_rate).replace('.', '_')}_{SESSION_ID}.csv"
     if not os.path.isfile(file_path):
         # Create an empty file
         logger_file = open(file_path, 'w')

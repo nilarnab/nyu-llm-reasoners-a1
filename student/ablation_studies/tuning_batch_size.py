@@ -23,9 +23,9 @@ from student.pretokenization_example import find_chunk_boundaries
 from student.sec_3.linear_class import TransformerLm
 from student.sec_4.training_utils import run_cross_entropy_util, get_lr_cosine_schedule, run_gradient_clipping_util
 from student.sec_5.main_training.main_loop import BATCH_SIZE
-from student.sec_5.training_loop import data_loader, save_checkpoint, load_checkpoint
+from student.sec_5.training_loop import data_loader, save_checkpoint
 from tests.adapters import get_adamw_cls
-
+from tests.conftest import batch_size
 
 # file paths
 SCRIPT_DIR = pathlib.Path(__file__).parent.absolute()
@@ -60,10 +60,6 @@ ITERATIONS = 2500
 # ====
 SAVE_CHECK_POINT_ITERATION = 50
 FIND_VAL_LOSS_ITERATION=50
-
-# LOAD_CHECK_POINT_PATH = str(SCRIPT_DIR / "checkpoints/<some chekcpoint>")
-LOAD_CHECK_POINT_PATH = None
-# LOAD_CHECK_POINT_PATH = str(SCRIPT_DIR / F"checkpoints/{}")
 
 if torch.cuda.is_available():
     print("device set to CUDA")
@@ -219,6 +215,7 @@ def get_validation_loss(model, val_data, num_batches=1):
     return avg_val_loss
 
 def main_training_loop(learning_rate,
+                       batch_size = None,
                        train_encoded_token_path=ENCODED_TOKEN_PATH,
                        val_encoded_token_path=None
                        ):
@@ -250,10 +247,8 @@ def main_training_loop(learning_rate,
         d_ff=int(D_FF), # TODO: NEED to allow float as well
         rope_theta=ROPE_THETA,
         weights=None,
-        device=DEVICE
+        device=DEVICE,
     )
-
-
     model.to(DEVICE)
     print("model initialized")
     optimizer = get_adamw_cls()(
@@ -265,18 +260,16 @@ def main_training_loop(learning_rate,
     )
 
     use_cuda_amp = (DEVICE == "cuda")
+
     if use_cuda_amp:
         scaler = torch.cuda.amp.GradScaler()
     else:
         scaler = None
 
-    it_start = 0
-    if LOAD_CHECK_POINT_PATH is not None:
-        it_start = load_checkpoint(model, optimizer, LOAD_CHECK_POINT_PATH)
-        print("MODEL LOADED, starting from IT", it_start)
+    total_iteration_count = int(10000/128) * ITERATIONS
 
-    for it_id in tqdm(it_start, range(ITERATIONS)):
-        input_tensor, target_tensor = data_loader(train_data, BATCH_SIZE, CONTEXT_LENGTH, DEVICE)
+    for it_id in tqdm(range(total_iteration_count)):
+        input_tensor, target_tensor = data_loader(train_data, batch_size, CONTEXT_LENGTH, DEVICE)
         # print("input shape", input_tensor.shape)
         optimizer.zero_grad()
 
@@ -340,8 +333,6 @@ def main_training_loop(learning_rate,
         # else:
         #     logger_csv_writer.writerow([it_id, train_loss_val, '_'])
 
-
-
         # checkpoint saving
         if it_id % SAVE_CHECK_POINT_ITERATION == 0:
             save_checkpoint(model, optimizer, it_id + 1, f"{CHECKPOINT_FOLDER}/checkpoint_tuning_learning_rate_SESSION{SESSION_ID}_IT{it_id}.pt")
@@ -368,11 +359,12 @@ if __name__ == '__main__':
 
 
 
-    learning_rate = 10**-5
+    learning_rate = 10**-3
     learning_rate_max = 1
-    while learning_rate <= learning_rate_max:
+    batch_sizes = [1, 16, 32, 64, 128, 256]
+    for batch_size in batch_sizes:
         print("LEARNING RATE", learning_rate)
-        main_training_loop(learning_rate, val_encoded_token_path=ENCODED_VAL_TOKEN_PATH)
+        main_training_loop(learning_rate, batch_size=batch_size, val_encoded_token_path=ENCODED_VAL_TOKEN_PATH)
         learning_rate = learning_rate * 10
 
 

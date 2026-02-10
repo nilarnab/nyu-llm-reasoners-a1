@@ -2,4 +2,4 @@
 
 # Usage: ./filter_csv.sh input.csv > output.csv
 
-awk -F',' '$3 != "_"' "$1"
+awk -F',' '$3 != "_"' " $1"

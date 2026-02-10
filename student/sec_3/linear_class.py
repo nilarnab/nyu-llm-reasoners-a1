@@ -137,6 +137,7 @@ class PositionFeedForwardSwigLu(torch.nn.Module):
         self.w1_weight = w1_weight if w1_weight is not None else init_weights(d_ff, d_model, device)
         self.w2_weight = w2_weight if w2_weight is not None else init_weights(d_model, d_ff, device)
         self.w3_weight = w3_weight if w3_weight is not None else init_weights(d_ff, d_model, device)
+        self.use_silu = False
 
     def forward(self, in_features):
 
@@ -145,17 +146,20 @@ class PositionFeedForwardSwigLu(torch.nn.Module):
         # print("shape w 2", self.w2_weight.shape)
         # print("shape w 3", self.w3_weight.shape)
         # print("d_model", self.d_model, "d_ff", self.d_ff)
+        if not self.use_silu:
+            silu_w1_x = silu(in_features @ rearrange(self.w1_weight, "o i -> i o"))
+            w3_x = in_features @ rearrange(self.w3_weight, "o i -> i o")
+            mult_val = silu_w1_x * w3_x
 
-        silu_w1_x = silu(in_features @ rearrange(self.w1_weight, "o i -> i o"))
-        w3_x = in_features @ rearrange(self.w3_weight, "o i -> i o")
+            # print("shape", mult_val.shape)
+            res = mult_val @ rearrange(self.w2_weight, "o i -> i o")
 
-        mult_val = silu_w1_x * w3_x
-
-        # print("shape", mult_val.shape)
-
-        res = mult_val @ rearrange(self.w2_weight, "o i -> i o")
-
-        return res
+            return res
+        else:
+            x = in_features @ rearrange(self.w1_weight, "o i -> i o")
+            x = silu(x)
+            x = x @ rearrange(self.w2_weight, "o i -> i o")
+            return x
 
 
 def run_softmax_util(in_features: Float[Tensor, " ..."], dim: int) -> Float[Tensor, " ..."]:
@@ -262,6 +266,7 @@ class MultiHeadedAttentionRoped(torch.nn.Module):
                  v_proj_weight = None,
                  o_proj_weight = None,
                  device: str = None,
+                 use_pe = True
                  ):
         super().__init__()
         self.d_model = d_model
@@ -282,7 +287,7 @@ class MultiHeadedAttentionRoped(torch.nn.Module):
 
         d_head = self.d_model // self.num_heads
         self.rope_layer = RotaryPositionalEmbedding(self.theta, d_head, self.max_seq_len, device=self.device)
-
+        self.use_pe = use_pe
 
 
     def forward(self,
@@ -325,8 +330,9 @@ class MultiHeadedAttentionRoped(torch.nn.Module):
 
           # Use head dimension, not full d_model!
 
-        q_split = self.rope_layer.forward(q_split, token_positions)
-        k_split = self.rope_layer.forward(k_split, token_positions)
+        if self.use_pe:
+            q_split = self.rope_layer.forward(q_split, token_positions)
+            k_split = self.rope_layer.forward(k_split, token_positions)
         # print("RoPE applied with d_head =", d_head)
 
         seq_len = in_features.shape[-2]
@@ -462,6 +468,8 @@ class TransformerBlock(torch.nn.Module):
                  device=None,
                  post_norm=False,
                  use_rms=True,
+                 use_pe=True,
+                 use_silu=False,
                  ):
         super().__init__()
         self.d_model = d_model
@@ -471,12 +479,15 @@ class TransformerBlock(torch.nn.Module):
         self.max_seq_len = max_seq_len
         self.theta = theta
         self.post_norm = post_norm
+        self.use_silu = use_silu
         self.rms_layer_1 = RMSNorm(d_model, 1e-5, rms1_weight,device=self.device)
         self.rms_layer_2 = RMSNorm(d_model, 1e-5, rms2_weight,device=self.device)
         self.mha_layer = MultiHeadedAttentionRoped(d_model, num_heads, max_seq_len, theta, q_proj_weight, k_proj_weight, v_proj_weight, o_proj_weight,device=self.device)
-        self.pffs_layer = PositionFeedForwardSwigLu(d_model, d_ff, pffs_weight1, pffs_weight2, pffs_weight3,device=self.device)
+        self.pffs_layer = PositionFeedForwardSwigLu(d_model, d_ff, pffs_weight1, pffs_weight2, pffs_weight3,device=self.device,use_silu=self.use_silu)
         self.use_rms = use_rms
-
+        self.use_pe = use_pe
+        self.mha_layer = MultiHeadedAttentionRoped(d_model, num_heads, max_seq_len, theta, q_proj_weight, k_proj_weight,
+                                                   v_proj_weight, o_proj_weight, device=self.device, use_pe=self.use_pe)
 
     def forward(self, in_features):
 
@@ -527,7 +538,10 @@ class TransformerLm(torch.nn.Module):
     rope_theta: float,
     weights: dict[str, Tensor] = None,
                  device='cpu',
-                 post_norm = False
+                 post_norm = False,
+                 use_pe = True,
+                 use_rms = True,
+                 use_silu = False
                  ):
         super().__init__()
         self.context_length = context_length
@@ -539,6 +553,9 @@ class TransformerLm(torch.nn.Module):
         self.state_dir = weights
         self.device = device
         self.post_norm = post_norm
+        self.use_silu = use_silu
+        self.use_pe = use_pe
+        self.use_rms = use_rms
 
         # layers present
         self.embedding_layer = Embedding(vocab_size, d_model, self.state_dir["token_embeddings.weight"] if weights is not None else None)
@@ -559,8 +576,10 @@ class TransformerLm(torch.nn.Module):
                 v_proj_weight=self.state_dir[f'layers.{i}.attn.v_proj.weight'] if weights is not None else None,
                 o_proj_weight=self.state_dir[f'layers.{i}.attn.output_proj.weight'] if weights is not None else None,
                 device=self.device,
-                post_norm=self.post_norm
-
+                post_norm=self.post_norm,
+                use_pe=self.use_pe,
+                use_rms=self.use_rms,
+                use_silu=self.use_silu
             )
             for i in range(num_layers)
         ]

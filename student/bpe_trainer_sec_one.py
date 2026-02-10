@@ -1,4 +1,5 @@
 import os
+import time
 from multiprocessing import Pool
 from typing import Iterable, Iterator
 
@@ -283,6 +284,104 @@ def merge_pairs(mergable_pair, frequency_table, special_tokens_set):
     return new_frequency_table
 
 
+def run_train_bpe_util_profiled(
+            input_path: str | os.PathLike,
+            vocab_size: int,
+            special_tokens: list[str],
+            **kwargs,
+    ) -> tuple[dict[int, bytes], list[tuple[bytes, bytes]]]:
+    print("BPE TRAINING STARTED")
+    start_time = time.time()
+
+    vocabulary = init_vocab(special_tokens)
+
+    # print("Base vocabulary:", vocabulary)
+    # print("base vocabulary size", len(vocabulary))
+    pre_tokenization_start_time = time.time()
+    frequency_table = get_pre_tokens(input_path, special_tokens)
+    time_now = time.time()
+    print("tokenization time", time_now - pre_tokenization_start_time, time_now - start_time)
+    # print("Frequency table:", frequency_table)
+
+    special_tokens_bytes = {token.encode('utf-8') for token in special_tokens}
+
+    pair_frequency_table = defaultdict(lambda: 0)
+    pair_index = defaultdict(set)
+    print("initial processing complete", time.time() - start_time)
+
+    for key in frequency_table:
+        for i in range(len(key) - 1):
+            a, b = key[i], key[i + 1]
+            if a in special_tokens_bytes or b in special_tokens_bytes:
+                continue
+            pair = (a, b)
+            pair_frequency_table[pair] += frequency_table[key]
+            pair_index[pair].add(key)
+
+    merges = []
+
+    if pair_frequency_table:
+        max_pair = max(pair_frequency_table.items(), key=lambda x: (x[1], x[0]))[0]
+    else:
+        max_pair = None
+
+    merging_start_time = time.time()
+    # one iteration
+    while len(vocabulary) < vocab_size and max_pair is not None:
+
+        # decide which pair to merge
+        mergable_pair = max_pair
+        merges.append(mergable_pair)
+        new_token = mergable_pair[0] + mergable_pair[1]
+        # print("Mergable pair:", mergable_pair)
+
+        affected_keys = list(pair_index[mergable_pair])
+        for key in affected_keys:
+            count = frequency_table[key]
+            new_key = []
+            i = 0
+            while i < len(key):
+                if i + 1 < len(key) and (key[i], key[i + 1]) == mergable_pair:
+                    new_key.append(new_token)
+                    i += 2
+                else:
+                    new_key.append(key[i])
+                    i += 1
+            new_key_tuple = tuple(new_key)
+
+            frequency_table[new_key_tuple] = frequency_table.pop(key)
+
+            for i in range(len(key) - 1):
+                old_pair = (key[i], key[i + 1])
+                if old_pair in pair_frequency_table:
+                    pair_frequency_table[old_pair] -= count
+                    pair_index[old_pair].discard(key)
+                    if pair_frequency_table[old_pair] <= 0:
+                        del pair_frequency_table[old_pair]
+                        del pair_index[old_pair]
+
+            for i in range(len(new_key_tuple) - 1):
+                a, b = new_key_tuple[i], new_key_tuple[i + 1]
+                if a in special_tokens_bytes or b in special_tokens_bytes:
+                    continue
+                pair = (a, b)
+                pair_frequency_table[pair] += count
+                pair_index[pair].add(new_key_tuple)
+
+        new_id = len(vocabulary)
+        vocabulary[new_id] = new_token
+        if pair_frequency_table:
+            max_pair = max(pair_frequency_table.items(), key=lambda x: (x[1], x[0]))
+            max_pair = max_pair[0]
+        else:
+            max_pair = None
+
+        # print("Vocabulary size", len(vocabulary))
+    time_now = time.time()
+    print("merging time", time_now - merging_start_time, time_now - start_time)
+
+    return vocabulary, merges
+
 def run_train_bpe_util(
             input_path: str | os.PathLike,
             vocab_size: int,
@@ -380,20 +479,8 @@ def run_train_bpe_util(
 
 
 
-# if __name__ == "__main__":
-    # run_train_bpe_util(input_path="/Users/nilarnabdebnath/Documents/course_work/sem2/llm_reasoners/assignment1/nyu-llm-reasoners-a1/student/assets/test_corpus", vocab_size=258, special_tokens=["<|endoftext|>"])
-    # merges = [('a', 'b'), ('ab', 'c')]
-    # vocab = {1: 'a'.encode("utf-8"),
-    #          2: 'b'.encode("utf-8"),
-    #          3: 'c'.encode("utf-8"),
-    #          4: 'ab'.encode("utf-8"),
-    #          5: ' '.encode("utf-8"),
-    #          6: 'abc'.encode("utf-8"),}
-    # merges = [(el[0].encode("utf-8"), el[1].encode("utf-8")) for el in merges]
-    # tokenizer = Tokenizer(vocab, merges)
-    # file = open("/Users/nilarnabdebnath/Documents/course_work/sem2/llm_reasoners/assignment1/nyu-llm-reasoners-a1/student/assets/test_corpus", "r")
-    # encoding = tokenizer.encode_iterable(file)
-    # print(encoding)
-
-    # decoded_text = tokenizer.decode(encoding)
-    # print(decoded_text)
+if __name__ == "__main__":
+    run_train_bpe_util_profiled(
+        input_path="/Users/nilarnabdebnath/Documents/course_work/sem2/llm_reasoners/assignment1/nyu-llm-reasoners-a1/tests/fixtures/TinyStoriesV2-GPT4-train.txt",
+        vocab_size=10000,
+        special_tokens=["<|endoftext|>"])
