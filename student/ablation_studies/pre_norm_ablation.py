@@ -53,13 +53,13 @@ MERGES_SAVE_FILE = str(SCRIPT_DIR / "merges_save.txt")
 
 # ===
 # BATCH_SIZE = 128
-BATCH_SIZE = 512
+BATCH_SIZE = 64
 CONTEXT_LENGTH = 256
-ITERATIONS = 2500
+ITERATIONS = 20000
 
 # ====
 SAVE_CHECK_POINT_ITERATION = 50
-FIND_VAL_LOSS_ITERATION=50
+FIND_VAL_LOSS_ITERATION=5
 
 if torch.cuda.is_available():
     print("device set to CUDA")
@@ -219,7 +219,7 @@ def main_training_loop(learning_rate,
                        val_encoded_token_path=None
                        ):
     # LOGGER
-    file_path = f"{LOGGER_FOLDER}/tuning_learning_rate{str(learning_rate).replace(".", "_")}_{SESSION_ID}.csv"
+    file_path = f"{LOGGER_FOLDER}/pre_norm_ablation{str(learning_rate).replace(".", "_")}_{SESSION_ID}.csv"
     if not os.path.isfile(file_path):
         # Create an empty file
         logger_file = open(file_path, 'w')
@@ -246,7 +246,8 @@ def main_training_loop(learning_rate,
         d_ff=int(D_FF), # TODO: NEED to allow float as well
         rope_theta=ROPE_THETA,
         weights=None,
-        device=DEVICE
+        device=DEVICE,
+        post_norm=False
     )
     model.to(DEVICE)
     print("model initialized")
@@ -308,6 +309,8 @@ def main_training_loop(learning_rate,
         # run_gradient_clipping_util(model.parameters(), max_l2_norm=1.0)
         # optimizer.step()
 
+        print(it_id + 1, ">> LOSS", train_loss_val)
+
         # validation loss calculation
         if val_data is not None and it_id % FIND_VAL_LOSS_ITERATION == 0:
             validation_loss = get_validation_loss(model, val_data, 1)
@@ -334,7 +337,7 @@ def main_training_loop(learning_rate,
 
         # checkpoint saving
         if it_id % SAVE_CHECK_POINT_ITERATION == 0:
-            save_checkpoint(model, optimizer, it_id + 1, f"{CHECKPOINT_FOLDER}/checkpoint_tuning_learning_rate_SESSION{SESSION_ID}_IT{it_id}.pt")
+            save_checkpoint(model, optimizer, it_id + 1, f"{CHECKPOINT_FOLDER}/checkpoint_pre_norm_ablation_SESSION{SESSION_ID}_IT{it_id}.pt")
 
 if __name__ == '__main__':
     if ENCODE_CORPUS:
@@ -358,12 +361,6 @@ if __name__ == '__main__':
 
 
 
-    learning_rate = 10**-5
-    learning_rate_max = 1
-    while learning_rate <= learning_rate_max:
-        print("LEARNING RATE", learning_rate)
-        main_training_loop(learning_rate, val_encoded_token_path=ENCODED_VAL_TOKEN_PATH)
-        learning_rate = learning_rate * 10
+    learning_rate = 10**-3
 
-
-    # main_training_loop(learning_rate, val_encoded_token_path=ENCODED_VAL_TOKEN_PATH)
+    main_training_loop(learning_rate, val_encoded_token_path=ENCODED_VAL_TOKEN_PATH)

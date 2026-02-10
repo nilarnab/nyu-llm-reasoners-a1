@@ -275,6 +275,14 @@ class MultiHeadedAttentionRoped(torch.nn.Module):
         self.v_proj_weight = v_proj_weight if v_proj_weight is not None else init_weights(d_model, d_model, device)
         self.o_proj_weight = o_proj_weight if o_proj_weight is not None else init_weights(d_model, d_model, device)
 
+        self.q_proj_weight_T = rearrange(self.q_proj_weight, "... a b -> ... b a")
+        self.k_proj_weight_T = rearrange(self.k_proj_weight, "... a b -> ... b a")
+        self.v_proj_weight_T = rearrange(self.v_proj_weight, "... a b -> ... b a")
+        self.o_proj_weight_T = rearrange(self.o_proj_weight, "... a b -> ... b a")
+
+        d_head = self.d_model // self.num_heads
+        self.rope_layer = RotaryPositionalEmbedding(self.theta, d_head, self.max_seq_len, device=self.device)
+
 
 
     def forward(self,
@@ -297,10 +305,10 @@ class MultiHeadedAttentionRoped(torch.nn.Module):
         # print("o_proj_weight", self.o_proj_weight.shape)
         # print("in_features", in_features.shape)
 
-        Q = in_features @ rearrange(self.q_proj_weight, "... a b -> ... b a")
-        K = in_features @ rearrange(self.k_proj_weight, "... a b -> ... b a")
-        V = in_features @ rearrange(self.v_proj_weight, "... a b -> ... b a")
-        O = in_features @ rearrange(self.o_proj_weight, "... a b -> ... b a")
+        Q = in_features @ self.q_proj_weight_T
+        K = in_features @ self.k_proj_weight_T
+        V = in_features @ self.v_proj_weight_T
+        O = in_features @ self.o_proj_weight_T
 
         # Q = rope_layer.forward(Q, token_positions)
         # K = rope_layer.forward(K, token_positions)
@@ -315,45 +323,48 @@ class MultiHeadedAttentionRoped(torch.nn.Module):
         v_split = rearrange(V, "b t (h d_h) -> b h t d_h", h=self.num_heads)
         # print("q_split shpae", q_split.shape)
 
-        d_head = self.d_model // self.num_heads  # Use head dimension, not full d_model!
-        rope_layer = RotaryPositionalEmbedding(self.theta, d_head, self.max_seq_len, device=self.device)
-        q_split = rope_layer.forward(q_split, token_positions)
-        k_split = rope_layer.forward(k_split, token_positions)
+          # Use head dimension, not full d_model!
+
+        q_split = self.rope_layer.forward(q_split, token_positions)
+        k_split = self.rope_layer.forward(k_split, token_positions)
         # print("RoPE applied with d_head =", d_head)
 
         seq_len = in_features.shape[-2]
         # mask_causal = torch.triu(torch.ones(seq_len, seq_len, device=in_features.device), diagonal=1).bool()
         mask_causal = torch.tril(torch.ones(seq_len, seq_len, device=in_features.device), diagonal=0).bool()
 
-        all_heads_res = []
+        # all_heads_res = []
 
-        for head_i in range(self.num_heads):
-            # print("head i", head_i)
-            # TODO: understand this breaking
-            q = q_split[:, head_i, :, :]
-            k = k_split[:, head_i, :, :]
-            v = v_split[:, head_i, :, :]
+        # for head_i in range(self.num_heads):
+        #     # print("head i", head_i)
+        #     # TODO: understand this breaking
+        #     q = q_split[:, head_i, :, :]
+        #     k = k_split[:, head_i, :, :]
+        #     v = v_split[:, head_i, :, :]
+        #
+        #     # mask_uncausal = torch.full((q @ rearrange(k, "... l d -> ... d l")).shape, 1, device=q_proj_weight.device)
+        #     # mask_causal = torch.triu(mask_uncausal, diagonal=1).bool()
+        #
+        #     # print("mask causal shape", mask_causal.shape)
+        #
+        #     attention_val = scaled_dot_product_attention_util(q, k, v, mask_causal)
+        #
+        #     # print("multiheaded attention val shape", attention_val.shape)
+        #
+        #     all_heads_res.append(attention_val)
 
-            # mask_uncausal = torch.full((q @ rearrange(k, "... l d -> ... d l")).shape, 1, device=q_proj_weight.device)
-            # mask_causal = torch.triu(mask_uncausal, diagonal=1).bool()
+        B, H, T, D_h = q_split.shape
+        q_split = q_split.reshape(B * H, T, D_h)
+        k_split = k_split.reshape(B * H, T, D_h)
+        v_split = v_split.reshape(B * H, T, D_h)
 
-            # print("mask causal shape", mask_causal.shape)
+        mask_causal_expanded = mask_causal.unsqueeze(0).expand(B * H, T, T)
 
-            attention_val = scaled_dot_product_attention_util(q, k, v, mask_causal)
+        concat_res = scaled_dot_product_attention_util(q_split, k_split, v_split, mask_causal_expanded)
+        concat_res = concat_res.reshape(B, H, T, D_h)
+        concat_res = concat_res.permute(0, 2, 1, 3).reshape(B, T, H * D_h)
 
-            # print("multiheaded attention val shape", attention_val.shape)
-
-            all_heads_res.append(attention_val)
-
-        concat_res = torch.cat(all_heads_res, dim=-1)
-        # # print(concat_res)
-
-        # print('concat res shape', concat_res.shape)
-
-        # print("O shape", O.shape)
-
-        res = concat_res @ self.o_proj_weight.T
-
+        res = concat_res @ self.o_proj_weight_T
         # print(res)
 
         return res
@@ -448,7 +459,9 @@ class TransformerBlock(torch.nn.Module):
                  k_proj_weight = None,
                  v_proj_weight = None,
                  o_proj_weight = None,
-                 device=None
+                 device=None,
+                 post_norm=False,
+                 use_rms=True,
                  ):
         super().__init__()
         self.d_model = d_model
@@ -457,24 +470,48 @@ class TransformerBlock(torch.nn.Module):
         self.d_ff = d_ff
         self.max_seq_len = max_seq_len
         self.theta = theta
+        self.post_norm = post_norm
         self.rms_layer_1 = RMSNorm(d_model, 1e-5, rms1_weight,device=self.device)
         self.rms_layer_2 = RMSNorm(d_model, 1e-5, rms2_weight,device=self.device)
         self.mha_layer = MultiHeadedAttentionRoped(d_model, num_heads, max_seq_len, theta, q_proj_weight, k_proj_weight, v_proj_weight, o_proj_weight,device=self.device)
         self.pffs_layer = PositionFeedForwardSwigLu(d_model, d_ff, pffs_weight1, pffs_weight2, pffs_weight3,device=self.device)
+        self.use_rms = use_rms
 
 
     def forward(self, in_features):
-        in_features = in_features.to(self.device)
-        rms_val = self.rms_layer_1.forward(in_features)
-        mha_roped_val = self.mha_layer.forward(rms_val)
 
-        y = in_features + mha_roped_val
-        # print("y shape", y.shape)
-        rms2_val = self.rms_layer_2.forward(y)
-        pffs_val = self.pffs_layer.forward(rms2_val)
+        if not self.post_norm: # pre norm
+            in_features = in_features.to(self.device)
+            if self.use_rms:
+                rms_val = self.rms_layer_1.forward(in_features)
+                mha_roped_val = self.mha_layer.forward(rms_val)
+            else:
+                mha_roped_val = self.mha_layer.forward(in_features)
 
-        y_2 = y + pffs_val
-        # print("y_2 shape", y_2.shape)
+            y = in_features + mha_roped_val
+            # print("y shape", y.shape)
+            if self.use_rms:
+                rms2_val = self.rms_layer_2.forward(y)
+                pffs_val = self.pffs_layer.forward(rms2_val)
+            else:
+                pffs_val = self.pffs_layer.forward(y)
+
+
+            y_2 = y + pffs_val
+            # print("y_2 shape", y_2.shape)
+        else:
+            in_features = in_features.to(self.device)
+
+            mha_val = self.mha_layer.forward(in_features)
+            if self.use_rms:
+                mha_val = self.rms_layer_1.forward(mha_val)
+
+            y = in_features + mha_val
+
+            pffs_val = self.pffs_layer.forward(y)
+            if self.use_rms:
+                pffs_val = self.rms_layer_2.forward(pffs_val)
+            y_2 = y + pffs_val
 
         return y_2
 
@@ -490,6 +527,7 @@ class TransformerLm(torch.nn.Module):
     rope_theta: float,
     weights: dict[str, Tensor] = None,
                  device='cpu',
+                 post_norm = False
                  ):
         super().__init__()
         self.context_length = context_length
@@ -500,6 +538,7 @@ class TransformerLm(torch.nn.Module):
         self.rope_theta = rope_theta
         self.state_dir = weights
         self.device = device
+        self.post_norm = post_norm
 
         # layers present
         self.embedding_layer = Embedding(vocab_size, d_model, self.state_dir["token_embeddings.weight"] if weights is not None else None)
@@ -519,7 +558,8 @@ class TransformerLm(torch.nn.Module):
                 k_proj_weight=self.state_dir[f'layers.{i}.attn.k_proj.weight'] if weights is not None else None,
                 v_proj_weight=self.state_dir[f'layers.{i}.attn.v_proj.weight'] if weights is not None else None,
                 o_proj_weight=self.state_dir[f'layers.{i}.attn.output_proj.weight'] if weights is not None else None,
-                device=self.device
+                device=self.device,
+                post_norm=self.post_norm
 
             )
             for i in range(num_layers)

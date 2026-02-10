@@ -358,12 +358,12 @@ if __name__ == '__main__':
 
 
 
-    learning_rate = 10**-5
+    learning_rate = 10**-3
     learning_rate_max = 1
-    while learning_rate <= learning_rate_max:
-        print("LEARNING RATE", learning_rate)
-        main_training_loop(learning_rate, val_encoded_token_path=ENCODED_VAL_TOKEN_PATH)
-        learning_rate = learning_rate * 10
+    # while learning_rate <= learning_rate_max:
+    #     print("LEARNING RATE", learning_rate)
+    #     main_training_loop(learning_rate, val_encoded_token_path=ENCODED_VAL_TOKEN_PATH)
+    #     learning_rate = learning_rate * 10
 
 
-    # main_training_loop(learning_rate, val_encoded_token_path=ENCODED_VAL_TOKEN_PATH)
+    main_training_loop(learning_rate, val_encoded_token_path=ENCODED_VAL_TOKEN_PATH)
