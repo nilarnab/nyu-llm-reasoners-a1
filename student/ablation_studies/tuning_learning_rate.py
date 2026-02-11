@@ -61,7 +61,7 @@ MERGES_SAVE_FILE = str(SCRIPT_DIR / "merges_save.txt")
 
 # ===
 # BATCH_SIZE = 128
-BATCH_SIZE = 512
+BATCH_SIZE = 256
 CONTEXT_LENGTH = 256
 ITERATIONS = 10000
 WARMUP_ITERS = min(1000, int(ITERATIONS * 0.25))
@@ -273,7 +273,11 @@ def main_training_loop(max_learning_rate,
     )
 
     model.to(DEVICE)
+    # trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    # print(f"Trainable parameters: {trainable_params:,}")
+
     model = torch.compile(model)
+
     print("model initialized")
     optimizer = get_adamw_cls()(
         model.parameters(),
@@ -356,19 +360,20 @@ def main_training_loop(max_learning_rate,
         if val_data is not None and it_id % FIND_VAL_LOSS_ITERATION == 0:
             validation_loss = get_validation_loss(model, val_data, 1)
             print(">> LOSS", train_loss_val, validation_loss)
+            val_perplexity = math.exp(validation_loss)
             # print([it_id, train_loss_val, validation_loss])
-            wandb.log({"val_loss": float(validation_loss)}, step=it_id)
+            wandb.log({"val_loss": float(validation_loss), "val_perplexity": val_perplexity}, step=it_id)
 
             # print([it_id, train_loss_val, validation_loss])
             # logger_csv_writer.writerow(
             #     [it_id, train_loss_val, validation_loss]
             # )
             # logger_file.flush()
-        else:
-            wandb.log({"train_loss": float(loss)}, step=it_id)
-            # logger_csv_writer.writerow(
-            #     [it_id, train_loss_val, "_"]
-            # )
+
+        wandb.log({"train_loss": float(loss), "train_perplexity": math.exp(loss.item())}, step=it_id)
+        # logger_csv_writer.writerow(
+        #     [it_id, train_loss_val, "_"]
+        # )
         # if val_data is not None:
         #     if it_id % FIND_VAL_LOSS_ITERATION == 0:
         #         print(">> LOSS", loss.item())
@@ -411,7 +416,7 @@ if __name__ == '__main__':
         min_learning_rate = max_learning_rate * MIN_LR_RATIO
         print("max leanring rate", max_learning_rate, "min_learning_Rate", min_learning_rate)
         wandb.init(
-            project="tinystories-training",
+            project="tinystories-training-testing",
             name=f"local-bs{BATCH_SIZE}-maxlr{max_learning_rate}-minlr{min_learning_rate}",  # optional: run name
             config={
                 "batch_size": BATCH_SIZE,

@@ -1,0 +1,43 @@
+_wandb:
+    value:
+        cli_version: 0.24.2
+        e:
+            0hw4msdpqsat6c6axbfbrfm0jcbta7ft:
+                codePath: student/ablation_studies/tuning_learning_rate.py
+                codePathLocal: tuning_learning_rate.py
+                email: nd3032@nyu.edu
+                executable: /Users/nilarnabdebnath/Documents/course_work/sem2/llm_reasoners/assignment1/nyu-llm-reasoners-a1/.venv/bin/python
+                git:
+                    commit: f3e8f3e89bbe82309159e8d82f56a346b621caaa
+                    remote: https://github.com/nilarnab/nyu-llm-reasoners-a1.git
+                host: Nilarnabs-MacBook-Air.local
+                os: macOS-15.7.3-arm64-arm-64bit-Mach-O
+                program: /Users/nilarnabdebnath/Documents/course_work/sem2/llm_reasoners/assignment1/nyu-llm-reasoners-a1/student/ablation_studies/tuning_learning_rate.py
+                python: CPython 3.13.7
+                root: /Users/nilarnabdebnath/Documents/course_work/sem2/llm_reasoners/assignment1/nyu-llm-reasoners-a1/student/ablation_studies
+                startedAt: "2026-02-11T20:33:15.308446Z"
+                writerId: 0hw4msdpqsat6c6axbfbrfm0jcbta7ft
+        m: []
+        python_version: 3.13.7
+        t:
+            "1":
+                - 1
+            "2":
+                - 1
+            "3":
+                - 13
+                - 16
+            "4": 3.13.7
+            "5": 0.24.2
+            "12": 0.24.2
+            "13": darwin-arm64
+batch_size:
+    value: 512
+epochs:
+    value: 10000
+max_learning_rate:
+    value: 0.01
+min_learning_rate:
+    value: 0.001
+model:
+    value: transformer
