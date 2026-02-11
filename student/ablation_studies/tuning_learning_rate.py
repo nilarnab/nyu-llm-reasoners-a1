@@ -61,10 +61,12 @@ MERGES_SAVE_FILE = str(SCRIPT_DIR / "merges_save.txt")
 
 # ===
 # BATCH_SIZE = 128
-BATCH_SIZE = 128
+BATCH_SIZE = 256
 CONTEXT_LENGTH = 256
-ITERATIONS = 10000
-
+ITERATIONS = 5000
+WARMUP_ITERS = int(ITERATIONS * 0.25)
+COSINE_CYCLE_ITERS = ITERATIONS
+MIN_LR_RATIO = 0.1
 
 # ====
 SAVE_CHECK_POINT_ITERATION = 500
@@ -73,6 +75,7 @@ FIND_VAL_LOSS_ITERATION=50
 # LOAD_CHECK_POINT_PATH = str(SCRIPT_DIR / "checkpoints/<some chekcpoint>")
 LOAD_CHECK_POINT_PATH = None
 # LOAD_CHECK_POINT_PATH = str(SCRIPT_DIR / F"checkpoints/{}")
+
 
 if torch.cuda.is_available():
     print("device set to CUDA")
@@ -227,7 +230,8 @@ def get_validation_loss(model, val_data, num_batches=1):
     avg_val_loss = total_loss / num_batches
     return avg_val_loss
 
-def main_training_loop(learning_rate,
+def main_training_loop(max_learning_rate,
+                       min_learning_rate,
                        train_encoded_token_path=ENCODED_TOKEN_PATH,
                        val_encoded_token_path=None
                        ):
@@ -238,16 +242,16 @@ def main_training_loop(learning_rate,
         torch.set_float32_matmul_precision('high')
 
     # LOGGER
-    file_path = f"{LOGGER_FOLDER}/tuning_learning_rate{str(learning_rate).replace('.', '_')}_{SESSION_ID}.csv"
-    if not os.path.isfile(file_path):
-        # Create an empty file
-        logger_file = open(file_path, 'w')
-        print("file created at", file_path)
-    else:
-        res = input("File already exists, delete it [y,n]?")
-        if res == 'y':
-            os.remove(file_path)
-        logger_file = open(file_path, 'w')
+    # file_path = f"{LOGGER_FOLDER}/tuning_learning_rate{str(learning_rate).replace('.', '_')}_{SESSION_ID}.csv"
+    # if not os.path.isfile(file_path):
+    #     # Create an empty file
+    #     logger_file = open(file_path, 'w')
+    #     print("file created at", file_path)
+    # else:
+    #     res = input("File already exists, delete it [y,n]?")
+    #     if res == 'y':
+    #         os.remove(file_path)
+    #     logger_file = open(file_path, 'w')
 
     # logger_csv_writer = writer(logger_file)
 
@@ -273,7 +277,7 @@ def main_training_loop(learning_rate,
     print("model initialized")
     optimizer = get_adamw_cls()(
         model.parameters(),
-        lr=learning_rate,
+        lr=min_learning_rate,
         weight_decay=weight_decay,
         betas=betas,
         eps=1e-8,
@@ -291,6 +295,21 @@ def main_training_loop(learning_rate,
         print("MODEL LOADED, starting from IT", it_start)
 
     for it_id in tqdm(range(it_start, ITERATIONS)):
+        current_lr = get_lr_cosine_schedule(
+            it=it_id,
+            max_learning_rate=max_learning_rate,
+            min_learning_rate=min_learning_rate,
+            warmup_iters=WARMUP_ITERS,
+            cosine_cycle_iters=ITERATIONS
+        )
+
+        for param_group in optimizer.param_groups:
+            param_group['lr'] = current_lr
+
+        wandb.log({
+            "learning_rate": float(current_lr)
+        }, step=it_id)
+
         input_tensor, target_tensor = data_loader(train_data, BATCH_SIZE, CONTEXT_LENGTH, DEVICE)
         # print("input shape", input_tensor.shape)
         optimizer.zero_grad()
@@ -385,25 +404,29 @@ if __name__ == '__main__':
         gpu_thread.join()
 
 
+    max_learning_rates = [1e-4, 3e-4, 6e-4, 1e-3, 3e-3]
 
-    learning_rate = 10**-3
-    learning_rate_max = 1
-
-    while learning_rate <= learning_rate_max:
-        print("LEARNING RATE", learning_rate)
+    for max_learning_rate in max_learning_rates:
+        max_learning_rate = max_learning_rate
+        min_learning_rate = max_learning_rate * MIN_LR_RATIO
+        print("max leanring rate", max_learning_rate, "min_learning_Rate", min_learning_rate)
         wandb.init(
             project="tinystories-training",
-            name="bs64-lr3e-4",  # optional: run name
+            name=f"hpc-bs{BATCH_SIZE}-maxlr{max_learning_rate}-minlr{min_learning_rate}",  # optional: run name
             config={
                 "batch_size": BATCH_SIZE,
-                "learning_rate": learning_rate,
+                "max_learning_rate": max_learning_rate,
+                "min_learning_rate": min_learning_rate,
                 "epochs": ITERATIONS,
                 "model": "transformer",
             }
         )
 
-        main_training_loop(learning_rate, val_encoded_token_path=ENCODED_VAL_TOKEN_PATH)
-        learning_rate = learning_rate * 10
+        main_training_loop(max_learning_rate, min_learning_rate, val_encoded_token_path=ENCODED_VAL_TOKEN_PATH)
+
+        wandb.finish()
+
+
 
 
     # main_training_loop(learning_rate, val_encoded_token_path=ENCODED_VAL_TOKEN_PATH)

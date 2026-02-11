@@ -1,0 +1,17 @@
+{
+  "os":  "macOS-15.7.3-arm64-arm-64bit-Mach-O",
+  "python":  "CPython 3.13.7",
+  "startedAt":  "2026-02-11T11:17:57.346590Z",
+  "program":  "/Users/nilarnabdebnath/Documents/course_work/sem2/llm_reasoners/assignment1/nyu-llm-reasoners-a1/student/ablation_studies/tuning_learning_rate.py",
+  "codePath":  "student/ablation_studies/tuning_learning_rate.py",
+  "codePathLocal":  "tuning_learning_rate.py",
+  "git":  {
+    "remote":  "https://github.com/nilarnab/nyu-llm-reasoners-a1.git",
+    "commit":  "af6960a2b86f152be4dbcb0138ef3e8c0bdc1f41"
+  },
+  "email":  "nd3032@nyu.edu",
+  "root":  "/Users/nilarnabdebnath/Documents/course_work/sem2/llm_reasoners/assignment1/nyu-llm-reasoners-a1/student/ablation_studies",
+  "host":  "Nilarnabs-MacBook-Air.local",
+  "executable":  "/Users/nilarnabdebnath/Documents/course_work/sem2/llm_reasoners/assignment1/nyu-llm-reasoners-a1/.venv/bin/python",
+  "writerId":  "sd7g6bhwkcmzufcia4yy8o1ojl59po6p"
+}
