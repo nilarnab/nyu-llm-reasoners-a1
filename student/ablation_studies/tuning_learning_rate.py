@@ -53,12 +53,12 @@ MERGES_SAVE_FILE = str(SCRIPT_DIR / "merges_save.txt")
 
 # ===
 # BATCH_SIZE = 128
-BATCH_SIZE = 512
+BATCH_SIZE = 64
 CONTEXT_LENGTH = 256
-ITERATIONS = 2500
+ITERATIONS = 20000
 
 # ====
-SAVE_CHECK_POINT_ITERATION = 50
+SAVE_CHECK_POINT_ITERATION = 500
 FIND_VAL_LOSS_ITERATION=50
 
 # LOAD_CHECK_POINT_PATH = str(SCRIPT_DIR / "checkpoints/<some chekcpoint>")
@@ -275,7 +275,7 @@ def main_training_loop(learning_rate,
         it_start = load_checkpoint(model, optimizer, LOAD_CHECK_POINT_PATH)
         print("MODEL LOADED, starting from IT", it_start)
 
-    for it_id in tqdm(it_start, range(ITERATIONS)):
+    for it_id in tqdm(range(it_start, ITERATIONS)):
         input_tensor, target_tensor = data_loader(train_data, BATCH_SIZE, CONTEXT_LENGTH, DEVICE)
         # print("input shape", input_tensor.shape)
         optimizer.zero_grad()

@@ -26,13 +26,15 @@ class Linear(torch.nn.Module):
         super().__init__(*args, **kwargs)
         self.in_features = in_features
         self.out_features = out_features
-        self.weights = self._init_weights(weights)
         self.device = device
+        self.weights = self._init_weights(weights)
         self.dtype = dtype
+
+        self.W_t = self.weights.t()
 
     def _init_weights(self, weight_tensor : torch.Tensor = None):
         if weight_tensor is None:
-            weight_tensor = torch.randn(self.out_features, self.in_features)
+            weight_tensor = torch.randn(self.out_features, self.in_features, device=self.device)
             sigma = (2 / (self.out_features + self.in_features)) ** 0.5
 
             torch.nn.init.trunc_normal_(weight_tensor, 0, sigma, -3*sigma, 3*sigma)
@@ -42,7 +44,7 @@ class Linear(torch.nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # print("weight shape", self.weights.shape)
         # print("feature shape", x.shape)
-        W = rearrange(self.weights, "o d -> d o")
+        W = self.W_t
         # print("weight shape", W.shape)
         res = x @ W
 
@@ -107,9 +109,6 @@ class RMSNorm(torch.nn.Module):
         in_dtype = x.dtype
         x = x.to(torch.float32)
 
-        x_2 = x*x
-        x_2_sum = x_2.sum()
-
         rms = torch.sqrt((x * x).mean(dim=-1, keepdim=True) + self.eps) # TODO: understand this one
         # print("rms shape", rms.shape)
 
@@ -130,14 +129,18 @@ def silu(x):
 
 class PositionFeedForwardSwigLu(torch.nn.Module):
     # TODO: learn the different shapes
-    def __init__(self, d_model, d_ff, w1_weight=None, w2_weight=None, w3_weight=None, device=None):
+    def __init__(self, d_model, d_ff, w1_weight=None, w2_weight=None, w3_weight=None, device=None, use_silu=False):
         super().__init__()
         self.d_model = d_model
         self.d_ff = d_ff
         self.w1_weight = w1_weight if w1_weight is not None else init_weights(d_ff, d_model, device)
         self.w2_weight = w2_weight if w2_weight is not None else init_weights(d_model, d_ff, device)
         self.w3_weight = w3_weight if w3_weight is not None else init_weights(d_ff, d_model, device)
-        self.use_silu = False
+        self.use_silu = use_silu
+
+        self.w1_weight_T = self.w1_weight.t()
+        self.w2_weight_T = self.w2_weight.t()
+        self.w3_weight_T = self.w3_weight.t()
 
     def forward(self, in_features):
 
@@ -147,18 +150,18 @@ class PositionFeedForwardSwigLu(torch.nn.Module):
         # print("shape w 3", self.w3_weight.shape)
         # print("d_model", self.d_model, "d_ff", self.d_ff)
         if not self.use_silu:
-            silu_w1_x = silu(in_features @ rearrange(self.w1_weight, "o i -> i o"))
-            w3_x = in_features @ rearrange(self.w3_weight, "o i -> i o")
+            silu_w1_x = silu(in_features @ self.w1_weight_T)
+            w3_x = in_features @ self.w3_weight_T
             mult_val = silu_w1_x * w3_x
 
             # print("shape", mult_val.shape)
-            res = mult_val @ rearrange(self.w2_weight, "o i -> i o")
+            res = mult_val @ self.w2_weight_T
 
             return res
         else:
-            x = in_features @ rearrange(self.w1_weight, "o i -> i o")
+            x = in_features @ self.w1_weight_T
             x = silu(x)
-            x = x @ rearrange(self.w2_weight, "o i -> i o")
+            x = x @ self.w2_weight_T
             return x
 
 
@@ -173,12 +176,15 @@ def run_softmax_util(in_features: Float[Tensor, " ..."], dim: int) -> Float[Tens
 
     tensor_inp = tensor_inp - max_val
 
-    exp_sm = torch.exp(tensor_inp).sum(dim=dim, keepdim=True) #TODO: understand broadcasting
+    # exp_sm = torch.exp(tensor_inp).sum(dim=dim, keepdim=True) #TODO: understand broadcasting
+    #
+    # tensor_inp = torch.exp(tensor_inp) / exp_sm
 
-    tensor_inp = torch.exp(tensor_inp) / exp_sm
+    # return tensor_inp
 
-
-    return tensor_inp
+    exp_vals = torch.exp(tensor_inp)
+    exp_sum = exp_vals.sum(dim=dim, keepdim=True)
+    return exp_vals / exp_sum
 
     return None
 
@@ -190,16 +196,18 @@ class RotaryPositionalEmbedding:
         self.d_k = d_k
         self.max_seq_len = max_seq_len
         self.device = device
+        pair_pos = torch.arange(d_k // 2, device=device)
+        self.freq = 1.0 / (self.theta ** (2 * pair_pos / d_k)).to(device)
 
     def forward(self, x: torch.Tensor, token_positions: torch.Tensor) -> torch.Tensor:
         x = x.to(self.device)
         token_positions = token_positions.to(self.device)
 
-        THETA = self.theta
+        # THETA = self.theta
         x_pair = rearrange(x,'... (c d) -> ... c d', d=2)
-        pair_pos = torch.arange(x_pair.shape[-2], device=self.device)
+        # pair_pos = torch.arange(x_pair.shape[-2], device=self.device)
 
-        freqs = (1.0/ (THETA ** (2*pair_pos/x.shape[-1]))).to(self.device)
+        freqs = self.freq
 
         if token_positions.dim() == 1:
             token_positions = rearrange(token_positions, 'seq -> 1 seq 1')
@@ -222,36 +230,49 @@ class RotaryPositionalEmbedding:
 
         return x_out
 
-def scaled_dot_product_attention_util(
-        Q: Float[Tensor, " ... queries d_k"],
-    K: Float[Tensor, " ... keys d_k"],
-    V: Float[Tensor, " ... values d_v"],
-    mask: Bool[Tensor, " ... queries keys"] | None = None,
-) -> Float[Tensor, " ... queries d_v"]:
-    # print("")
-    # print("shapes Q", Q.shape)
-    # print("shapes K", K.shape)
-    # print("shapes V", V.shape)
-    # print("shape mask", mask.shape)
 
-    K_transpose = rearrange(K, "... l d -> ... d l")
-    # print("q transpose shape", K_transpose.shape)
-
+def scaled_dot_product_attention_util(Q, K, V, mask=None):
     d_k = Q.shape[-1]
-    qt_k_mult = ( Q @ K_transpose)
+    scores = Q @ K.transpose(-2, -1) / (d_k ** 0.5)
 
-    mask_tensor = torch.where(
-        mask,
-        torch.tensor(0.0, device=mask.device),
-        torch.tensor(-float('inf'), device=mask.device)
-    )
+    if mask is not None:
+        scores = scores.masked_fill(~mask, float('-inf'))
 
-    # print("qt_k_mult shape", qt_k_mult.shape)
-    attention_val = run_softmax_util((qt_k_mult + mask_tensor)/d_k ** 0.5, -1) @ V
-    # print("attention val shape", attention_val.shape)
+    attention_weights = run_softmax_util(scores, dim=-1)
+
+    return attention_weights @ V
 
 
-    return attention_val
+# def scaled_dot_product_attention_util(
+#         Q: Float[Tensor, " ... queries d_k"],
+#     K: Float[Tensor, " ... keys d_k"],
+#     V: Float[Tensor, " ... values d_v"],
+#     mask: Bool[Tensor, " ... queries keys"] | None = None,
+# ) -> Float[Tensor, " ... queries d_v"]:
+#     # print("")
+#     # print("shapes Q", Q.shape)
+#     # print("shapes K", K.shape)
+#     # print("shapes V", V.shape)
+#     # print("shape mask", mask.shape)
+#
+#     K_transpose = rearrange(K, "... l d -> ... d l")
+#     # print("q transpose shape", K_transpose.shape)
+#
+#     d_k = Q.shape[-1]
+#     qt_k_mult = ( Q @ K_transpose)
+#
+#     mask_tensor = torch.where(
+#         mask,
+#         torch.tensor(0.0, device=mask.device),
+#         torch.tensor(-float('inf'), device=mask.device)
+#     )
+#
+#     # print("qt_k_mult shape", qt_k_mult.shape)
+#     attention_val = run_softmax_util((qt_k_mult + mask_tensor)/d_k ** 0.5, -1) @ V
+#     # print("attention val shape", attention_val.shape)
+#
+#
+#     return attention_val
 
 
 
@@ -313,7 +334,6 @@ class MultiHeadedAttentionRoped(torch.nn.Module):
         Q = in_features @ self.q_proj_weight_T
         K = in_features @ self.k_proj_weight_T
         V = in_features @ self.v_proj_weight_T
-        O = in_features @ self.o_proj_weight_T
 
         # Q = rope_layer.forward(Q, token_positions)
         # K = rope_layer.forward(K, token_positions)
@@ -359,18 +379,26 @@ class MultiHeadedAttentionRoped(torch.nn.Module):
         #
         #     all_heads_res.append(attention_val)
 
+        mask_causal = mask_causal.unsqueeze(0).unsqueeze(0)
+
+
         B, H, T, D_h = q_split.shape
-        q_split = q_split.reshape(B * H, T, D_h)
-        k_split = k_split.reshape(B * H, T, D_h)
-        v_split = v_split.reshape(B * H, T, D_h)
+        # q_split = q_split.reshape(B * H, T, D_h)
+        # k_split = k_split.reshape(B * H, T, D_h)
+        # v_split = v_split.reshape(B * H, T, D_h)
 
-        mask_causal_expanded = mask_causal.unsqueeze(0).expand(B * H, T, T)
-
-        concat_res = scaled_dot_product_attention_util(q_split, k_split, v_split, mask_causal_expanded)
-        concat_res = concat_res.reshape(B, H, T, D_h)
-        concat_res = concat_res.permute(0, 2, 1, 3).reshape(B, T, H * D_h)
-
+        # mask_causal_expanded = mask_causal.unsqueeze(0).expand(B * H, T, T)
+        # mask_causal = mask_causal.unsqueeze(0).unsqueeze(0)
+        concat_res = scaled_dot_product_attention_util(q_split, k_split, v_split, mask_causal)
+        concat_res = concat_res.transpose(1, 2).reshape(B, T, H * D_h)
         res = concat_res @ self.o_proj_weight_T
+
+
+        # concat_res = scaled_dot_product_attention_util(q_split, k_split, v_split, mask_causal_expanded)
+        # concat_res = concat_res.reshape(B, H, T, D_h)
+        # concat_res = concat_res.permute(0, 2, 1, 3).reshape(B, T, H * D_h)
+        #
+        # res = concat_res @ self.o_proj_weight_T
         # print(res)
 
         return res
@@ -401,7 +429,6 @@ class MultiHeadedAttentionNonRoped(torch.nn.Module):
         Q = in_features @ rearrange(q_proj_weight, "... a b -> ... b a")
         K = in_features @ rearrange(k_proj_weight, "... a b -> ... b a")
         V = in_features @ rearrange(v_proj_weight, "... a b -> ... b a")
-        O = in_features @ rearrange(o_proj_weight, "... a b -> ... b a")
 
         # q_split = rearrange(Q, "... (h b) -> h ... b", h=num_heads)
         # k_split = rearrange(K, "... (h b) -> h ... b", h=num_heads)
@@ -537,7 +564,7 @@ class TransformerLm(torch.nn.Module):
     d_ff: int,
     rope_theta: float,
     weights: dict[str, Tensor] = None,
-                 device='cpu',
+                 device=None,
                  post_norm = False,
                  use_pe = True,
                  use_rms = True,
@@ -583,8 +610,8 @@ class TransformerLm(torch.nn.Module):
             )
             for i in range(num_layers)
         ]
-        self.rms_final_layer = RMSNorm(d_model, 1e-5, self.state_dir[f"ln_final.weight"] if weights is not None else None)
-        self.linear_layer = Linear(d_model, vocab_size, weights=self.state_dir["lm_head.weight"] if weights is not None else None) # TODO: how to find out its shape in advance
+        self.rms_final_layer = RMSNorm(d_model, 1e-5, self.state_dir[f"ln_final.weight"] if weights is not None else None, device=self.device)
+        self.linear_layer = Linear(d_model, vocab_size, weights=self.state_dir["lm_head.weight"] if weights is not None else None, device=self.device) # TODO: how to find out its shape in advance
 
 
     def forward(self, in_indices: Int[Tensor, " batch_size sequence_length"]):
