@@ -7,3 +7,4 @@ psutil
 tiktoken
 einops
 tqdm
+wandb

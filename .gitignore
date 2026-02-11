@@ -171,3 +171,5 @@ tests/fixtures/TinyStoriesV2-GPT4-valid.txt
 student/ablation_studies/encoded_tokens.npy
 student/ablation_studies/encoded_val_tokens.npy
 student/ablation_studies/loss_logs/*.csv
+
+*/wandb/

@@ -27,6 +27,12 @@ from student.sec_5.training_loop import data_loader, save_checkpoint, load_check
 from tests.adapters import get_adamw_cls
 
 
+# wandb things
+import wandb
+os.environ["WANDB_API_KEY"] = "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"
+wandb.login(key=os.environ["WANDB_API_KEY"])
+
+
 # file paths
 SCRIPT_DIR = pathlib.Path(__file__).parent.absolute()
 PROJECT_ROOT = SCRIPT_DIR.parent.parent
@@ -51,11 +57,14 @@ LOGGER_FOLDER = str(SCRIPT_DIR / "loss_logs")
 VOCAB_SAVE_FILE = str(SCRIPT_DIR / "vocab_save.json")
 MERGES_SAVE_FILE = str(SCRIPT_DIR / "merges_save.txt")
 
+
+
 # ===
 # BATCH_SIZE = 128
-BATCH_SIZE = 64
+BATCH_SIZE = 128
 CONTEXT_LENGTH = 256
-ITERATIONS = 20000
+ITERATIONS = 10000
+
 
 # ====
 SAVE_CHECK_POINT_ITERATION = 500
@@ -222,6 +231,12 @@ def main_training_loop(learning_rate,
                        train_encoded_token_path=ENCODED_TOKEN_PATH,
                        val_encoded_token_path=None
                        ):
+    if DEVICE == "cuda":
+        torch.backends.cudnn.benchmark = True
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
+        torch.set_float32_matmul_precision('high')
+
     # LOGGER
     file_path = f"{LOGGER_FOLDER}/tuning_learning_rate{str(learning_rate).replace('.', '_')}_{SESSION_ID}.csv"
     if not os.path.isfile(file_path):
@@ -234,7 +249,7 @@ def main_training_loop(learning_rate,
             os.remove(file_path)
         logger_file = open(file_path, 'w')
 
-    logger_csv_writer = writer(logger_file)
+    # logger_csv_writer = writer(logger_file)
 
 
 
@@ -253,8 +268,8 @@ def main_training_loop(learning_rate,
         device=DEVICE
     )
 
-
     model.to(DEVICE)
+    model = torch.compile(model)
     print("model initialized")
     optimizer = get_adamw_cls()(
         model.parameters(),
@@ -322,14 +337,19 @@ def main_training_loop(learning_rate,
         if val_data is not None and it_id % FIND_VAL_LOSS_ITERATION == 0:
             validation_loss = get_validation_loss(model, val_data, 1)
             print(">> LOSS", train_loss_val, validation_loss)
-            logger_csv_writer.writerow(
-                [it_id, train_loss_val, validation_loss]
-            )
-            logger_file.flush()
+            # print([it_id, train_loss_val, validation_loss])
+            wandb.log({"val_loss": float(validation_loss)}, step=it_id)
+
+            # print([it_id, train_loss_val, validation_loss])
+            # logger_csv_writer.writerow(
+            #     [it_id, train_loss_val, validation_loss]
+            # )
+            # logger_file.flush()
         else:
-            logger_csv_writer.writerow(
-                [it_id, train_loss_val, "_"]
-            )
+            wandb.log({"train_loss": float(loss)}, step=it_id)
+            # logger_csv_writer.writerow(
+            #     [it_id, train_loss_val, "_"]
+            # )
         # if val_data is not None:
         #     if it_id % FIND_VAL_LOSS_ITERATION == 0:
         #         print(">> LOSS", loss.item())
@@ -339,8 +359,6 @@ def main_training_loop(learning_rate,
         #         logger_csv_writer.writerow([it_id, train_loss_val, '_'])
         # else:
         #     logger_csv_writer.writerow([it_id, train_loss_val, '_'])
-
-
 
         # checkpoint saving
         if it_id % SAVE_CHECK_POINT_ITERATION == 0:
@@ -368,10 +386,22 @@ if __name__ == '__main__':
 
 
 
-    learning_rate = 10**-5
+    learning_rate = 10**-3
     learning_rate_max = 1
+
     while learning_rate <= learning_rate_max:
         print("LEARNING RATE", learning_rate)
+        wandb.init(
+            project="tinystories-training",
+            name="bs64-lr3e-4",  # optional: run name
+            config={
+                "batch_size": BATCH_SIZE,
+                "learning_rate": learning_rate,
+                "epochs": ITERATIONS,
+                "model": "transformer",
+            }
+        )
+
         main_training_loop(learning_rate, val_encoded_token_path=ENCODED_VAL_TOKEN_PATH)
         learning_rate = learning_rate * 10
 
