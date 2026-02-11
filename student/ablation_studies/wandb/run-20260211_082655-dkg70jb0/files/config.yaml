@@ -1,0 +1,60 @@
+_wandb:
+    value:
+        cli_version: 0.24.2
+        e:
+            56911lyjloz4f3zc8bq3rn2he862uxkg:
+                apple:
+                    ecpuCores: 6
+                    gpuCores: 10
+                    memoryGb: 24
+                    name: Apple M4
+                    pcpuCores: 4
+                    ramTotalBytes: "25769803776"
+                    swapTotalBytes: "5368709120"
+                codePath: student/ablation_studies/tuning_learning_rate.py
+                codePathLocal: tuning_learning_rate.py
+                cpu_count: 10
+                cpu_count_logical: 10
+                disk:
+                    /:
+                        total: "994662584320"
+                        used: "792434556928"
+                email: nd3032@nyu.edu
+                executable: /Users/nilarnabdebnath/Documents/course_work/sem2/llm_reasoners/assignment1/nyu-llm-reasoners-a1/.venv/bin/python
+                git:
+                    commit: 0fd7505609af3e863eec6107be1f5d9e047d597f
+                    remote: https://github.com/nilarnab/nyu-llm-reasoners-a1.git
+                host: Nilarnabs-MacBook-Air.local
+                memory:
+                    total: "25769803776"
+                os: macOS-15.7.3-arm64-arm-64bit-Mach-O
+                program: /Users/nilarnabdebnath/Documents/course_work/sem2/llm_reasoners/assignment1/nyu-llm-reasoners-a1/student/ablation_studies/tuning_learning_rate.py
+                python: CPython 3.13.7
+                root: /Users/nilarnabdebnath/Documents/course_work/sem2/llm_reasoners/assignment1/nyu-llm-reasoners-a1/student/ablation_studies
+                startedAt: "2026-02-11T13:26:55.195297Z"
+                writerId: 56911lyjloz4f3zc8bq3rn2he862uxkg
+        m: []
+        python_version: 3.13.7
+        t:
+            "1":
+                - 1
+            "2":
+                - 1
+            "3":
+                - 13
+                - 16
+                - 61
+            "4": 3.13.7
+            "5": 0.24.2
+            "12": 0.24.2
+            "13": darwin-arm64
+batch_size:
+    value: 256
+epochs:
+    value: 5000
+max_learning_rate:
+    value: 0.1
+min_learning_rate:
+    value: 0.010000000000000002
+model:
+    value: transformer

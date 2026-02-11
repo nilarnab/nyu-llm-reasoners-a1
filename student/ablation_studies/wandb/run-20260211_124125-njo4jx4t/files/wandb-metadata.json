@@ -1,0 +1,37 @@
+{
+  "os":  "macOS-15.7.3-arm64-arm-64bit-Mach-O",
+  "python":  "CPython 3.13.7",
+  "startedAt":  "2026-02-11T17:41:25.931290Z",
+  "program":  "/Users/nilarnabdebnath/Documents/course_work/sem2/llm_reasoners/assignment1/nyu-llm-reasoners-a1/student/ablation_studies/tuning_learning_rate.py",
+  "codePath":  "student/ablation_studies/tuning_learning_rate.py",
+  "codePathLocal":  "tuning_learning_rate.py",
+  "git":  {
+    "remote":  "https://github.com/nilarnab/nyu-llm-reasoners-a1.git",
+    "commit":  "0fd7505609af3e863eec6107be1f5d9e047d597f"
+  },
+  "email":  "nd3032@nyu.edu",
+  "root":  "/Users/nilarnabdebnath/Documents/course_work/sem2/llm_reasoners/assignment1/nyu-llm-reasoners-a1/student/ablation_studies",
+  "host":  "Nilarnabs-MacBook-Air.local",
+  "executable":  "/Users/nilarnabdebnath/Documents/course_work/sem2/llm_reasoners/assignment1/nyu-llm-reasoners-a1/.venv/bin/python",
+  "cpu_count":  10,
+  "cpu_count_logical":  10,
+  "disk":  {
+    "/":  {
+      "total":  "994662584320",
+      "used":  "795411316736"
+    }
+  },
+  "memory":  {
+    "total":  "25769803776"
+  },
+  "apple":  {
+    "name":  "Apple M4",
+    "ecpuCores":  6,
+    "pcpuCores":  4,
+    "gpuCores":  10,
+    "memoryGb":  24,
+    "swapTotalBytes":  "7516192768",
+    "ramTotalBytes":  "25769803776"
+  },
+  "writerId":  "hg70htrz9pc0meikhllzdy3ei9n8ashb"
+}

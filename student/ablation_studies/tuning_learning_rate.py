@@ -61,10 +61,10 @@ MERGES_SAVE_FILE = str(SCRIPT_DIR / "merges_save.txt")
 
 # ===
 # BATCH_SIZE = 128
-BATCH_SIZE = 256
+BATCH_SIZE = 512
 CONTEXT_LENGTH = 256
-ITERATIONS = 5000
-WARMUP_ITERS = int(ITERATIONS * 0.25)
+ITERATIONS = 10000
+WARMUP_ITERS = min(1000, int(ITERATIONS * 0.25))
 COSINE_CYCLE_ITERS = ITERATIONS
 MIN_LR_RATIO = 0.1
 
@@ -209,7 +209,7 @@ def encode_and_save_data(
         for encoding in tqdm(pool.imap(encode_chunk, args_list), total=len(args_list)):
             all_tokens.extend(encoding)
 
-    token_array = np.array(all_tokens, dtype=np.int32)
+    token_array = np.array(all_tokens, dtype=np.int16)
     np.save(output_path, token_array)
     print("Saved at location", output_path)
 
@@ -404,7 +404,7 @@ if __name__ == '__main__':
         gpu_thread.join()
 
 
-    max_learning_rates = [1e-4, 3e-4, 6e-4, 1e-3, 3e-3]
+    max_learning_rates = [0.01, 0.1, 6e-4, 1e-3, 3e-3]
 
     for max_learning_rate in max_learning_rates:
         max_learning_rate = max_learning_rate
@@ -412,7 +412,7 @@ if __name__ == '__main__':
         print("max leanring rate", max_learning_rate, "min_learning_Rate", min_learning_rate)
         wandb.init(
             project="tinystories-training",
-            name=f"hpc-bs{BATCH_SIZE}-maxlr{max_learning_rate}-minlr{min_learning_rate}",  # optional: run name
+            name=f"local-bs{BATCH_SIZE}-maxlr{max_learning_rate}-minlr{min_learning_rate}",  # optional: run name
             config={
                 "batch_size": BATCH_SIZE,
                 "max_learning_rate": max_learning_rate,

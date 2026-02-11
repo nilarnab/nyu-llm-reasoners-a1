@@ -8,3 +8,4 @@ tiktoken
 einops
 tqdm
 wandb
+memory-profiler

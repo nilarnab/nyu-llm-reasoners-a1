@@ -310,6 +310,9 @@ class MultiHeadedAttentionRoped(torch.nn.Module):
         self.rope_layer = RotaryPositionalEmbedding(self.theta, d_head, self.max_seq_len, device=self.device)
         self.use_pe = use_pe
 
+        # weight tieying
+        # self.linear_layer.weight = self.embedding_layer.weight.T
+
 
     def forward(self,
     in_features: Float[Tensor, " ... sequence_length d_in"],
@@ -509,7 +512,6 @@ class TransformerBlock(torch.nn.Module):
         self.use_silu = use_silu
         self.rms_layer_1 = RMSNorm(d_model, 1e-5, rms1_weight,device=self.device)
         self.rms_layer_2 = RMSNorm(d_model, 1e-5, rms2_weight,device=self.device)
-        self.mha_layer = MultiHeadedAttentionRoped(d_model, num_heads, max_seq_len, theta, q_proj_weight, k_proj_weight, v_proj_weight, o_proj_weight,device=self.device)
         self.pffs_layer = PositionFeedForwardSwigLu(d_model, d_ff, pffs_weight1, pffs_weight2, pffs_weight3,device=self.device,use_silu=self.use_silu)
         self.use_rms = use_rms
         self.use_pe = use_pe
@@ -538,18 +540,15 @@ class TransformerBlock(torch.nn.Module):
             y_2 = y + pffs_val
             # print("y_2 shape", y_2.shape)
         else:
-            in_features = in_features.to(self.device)
-
-            mha_val = self.mha_layer.forward(in_features)
-            if self.use_rms:
-                mha_val = self.rms_layer_1.forward(mha_val)
-
+            mha_val = self.mha_layer(in_features)
             y = in_features + mha_val
-
-            pffs_val = self.pffs_layer.forward(y)
             if self.use_rms:
-                pffs_val = self.rms_layer_2.forward(pffs_val)
+                y = self.rms_layer_1(y)
+
+            pffs_val = self.pffs_layer(y)
             y_2 = y + pffs_val
+            if self.use_rms:
+                y_2 = self.rms_layer_2(y_2)
 
         return y_2
 
@@ -586,7 +585,7 @@ class TransformerLm(torch.nn.Module):
 
         # layers present
         self.embedding_layer = Embedding(vocab_size, d_model, self.state_dir["token_embeddings.weight"] if weights is not None else None)
-        self.transformer_blocks = [
+        self.transformer_blocks = torch.nn.ModuleList([
             TransformerBlock(
                 d_model,
                 num_heads,
@@ -609,10 +608,12 @@ class TransformerLm(torch.nn.Module):
                 use_silu=self.use_silu
             )
             for i in range(num_layers)
-        ]
+        ])
         self.rms_final_layer = RMSNorm(d_model, 1e-5, self.state_dir[f"ln_final.weight"] if weights is not None else None, device=self.device)
         self.linear_layer = Linear(d_model, vocab_size, weights=self.state_dir["lm_head.weight"] if weights is not None else None, device=self.device) # TODO: how to find out its shape in advance
 
+        # tieing the weights
+        # self.linear_layer.weight = self.embedding_layer.weight
 
     def forward(self, in_indices: Int[Tensor, " batch_size sequence_length"]):
         # print("in_indices shape", in_indices.shape)

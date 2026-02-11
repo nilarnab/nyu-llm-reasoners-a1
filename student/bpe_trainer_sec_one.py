@@ -5,8 +5,13 @@ from typing import Iterable, Iterator
 
 import regex as re
 from collections import defaultdict
+
 from student.pretokenization_example import find_chunk_boundaries
 from functools import lru_cache
+
+import cProfile
+from memory_profiler import memory_usage
+import pstats
 
 # from pretokenization_example import find_chunk_boundaries
 
@@ -382,6 +387,11 @@ def run_train_bpe_util_profiled(
 
     return vocabulary, merges
 
+def get_longest_token(vocab: dict[int, bytes]):
+    longest_token = max(vocab.values(), key=lambda x: len(x))
+    print("the longest token", longest_token)
+    return longest_token.decode("utf-8"), len(longest_token)
+
 def run_train_bpe_util(
             input_path: str | os.PathLike,
             vocab_size: int,
@@ -478,9 +488,35 @@ def run_train_bpe_util(
 # reference first merge (b' ', b't'),
 
 
+def main():
+    # run_train_bpe_util_profiled(
+    #     input_path="/Users/nilarnabdebnath/Documents/course_work/sem2/llm_reasoners/assignment1/nyu-llm-reasoners-a1/tests/fixtures/TinyStoriesV2-GPT4-train.txt",
+    #     vocab_size=10000,
+    #     special_tokens=["<|endoftext|>"])
+    peak_mem, result = memory_usage(
+        (run_train_bpe_util_profiled, (), {  # function, args tuple, kwargs dict
+            "input_path": '/Users/nilarnabdebnath/Documents/course_work/sem2/llm_reasoners/assignment1/nyu-llm-reasoners-a1/tests/fixtures/TinyStoriesV2-GPT4-train.txt',
+            "vocab_size": 10000,
+            "special_tokens": ["<|endoftext|>"]
+        }),
+        retval=True,
+        max_usage=True,
+    )
+
+    vocab, merges = result
+    longest_token, length = get_longest_token(vocab)
+
+    print("longest token", length)
+
+    print(f"Peak memory usage: {peak_mem:.2f} MB")
+    return result
+
 
 if __name__ == "__main__":
-    run_train_bpe_util_profiled(
-        input_path="/Users/nilarnabdebnath/Documents/course_work/sem2/llm_reasoners/assignment1/nyu-llm-reasoners-a1/tests/fixtures/TinyStoriesV2-GPT4-train.txt",
-        vocab_size=10000,
-        special_tokens=["<|endoftext|>"])
+    # run_train_bpe_util_profiled(
+    #     input_path="/Users/nilarnabdebnath/Documents/course_work/sem2/llm_reasoners/assignment1/nyu-llm-reasoners-a1/tests/fixtures/TinyStoriesV2-GPT4-train.txt",
+    #     vocab_size=10000,
+    #     special_tokens=["<|endoftext|>"])
+    main()
+
+    # cProfile.run("main()", "bpe_profile.prof")
