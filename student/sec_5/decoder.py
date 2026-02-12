@@ -1,20 +1,8 @@
-import os
-from typing import Any, Optional, Callable, Iterable, BinaryIO, IO
 import torch
-from numpy.random import normal
-from torch import Tensor
-import numpy as np
-import numpy.typing as npt
-import random
-from einops import rearrange
-from jaxtyping import Bool, Float, Int
 
 from student.bpe_trainer_sec_one import load_bpe_model, Tokenizer
-from student.sec_3.linear_class import run_softmax_util, TransformerLm
-from student.sec_5.training_loop import load_checkpoint
+from student.sec_5.training_loop import load_checkpoint_onlycpu
 
-
-# ===========
 FIXTURES_PATH = "../../../tests/fixtures"
 BPE_TRAIN_INPUT_PATH = f"{FIXTURES_PATH}/tinystories_sample.txt"
 INPUT_PATH = BPE_TRAIN_INPUT_PATH
@@ -33,7 +21,7 @@ DEVICE = "cpu"
 
 # OPTIMIZER
 lr = 1e-3
-betas=(0.9, 0.999)
+betas = (0.9, 0.999)
 weight_decay = 0.01
 
 CHUNKING_NUM_PROCESSES = 20
@@ -47,16 +35,17 @@ ENCODE_CORPUS = False
 D_MODEL = 256
 NUM_BLOCKS = 4
 NUM_HEADS = 2
-D_FF = D_MODEL * (3/8)
+D_FF = D_MODEL * (3 / 8)
 ROPE_THETA = 10000.0
 # =========
 
 
-BPE_CORPUS_PATH = "/Users/nilarnabdebnath/Documents/course_work/sem2/llm_reasoners/assignment1/nyu-llm-reasoners-a1/tests/fixtures/tinystories_sample.txt"
-CHECK_POINT_PATH = "/Users/nilarnabdebnath/Documents/course_work/sem2/llm_reasoners/assignment1/nyu-llm-reasoners-a1/student/ablation_studies/checkpoints/checkpoint_tuning_learning_rate_SESSION20260211_185330_IT41.pt"
+BPE_CORPUS_PATH = "/scratch/nd3032/nyu-llm-reasoners-a1/tests/fixtures/TinyStoriesV2-GPT4-train.txt"
+CHECK_POINT_PATH = "/scratch/nd3032/important_data/checkpoint_tuning_learning_rate_SESSION20260211_133034_IT6000.pt"
 
-VOCAB_PATH = "/Users/nilarnabdebnath/Documents/course_work/sem2/llm_reasoners/assignment1/nyu-llm-reasoners-a1/student/ablation_studies/vocab_save.json"
-MERGES_PATH = "/Users/nilarnabdebnath/Documents/course_work/sem2/llm_reasoners/assignment1/nyu-llm-reasoners-a1/student/ablation_studies/merges_save.txt"
+VOCAB_PATH = "/scratch/nd3032/nyu-llm-reasoners-a1/student/ablation_studies/vocab_save.json"
+MERGES_PATH = "/scratch/nd3032/nyu-llm-reasoners-a1/student/ablation_studies/merges_save.txt"
+
 
 def nucleus_sampling(input, top_p=0):
     sorted_probs, sorted_indices = torch.sort(input, descending=True)
@@ -81,13 +70,12 @@ def nucleus_sampling(input, top_p=0):
 
 def decode(
         model,
-        prompt = "",
+        prompt="",
         tokenizer=None,
         max_new_tokens=256,
-        device="cpu",
+        device=DEVICE,
         temperature=1,
         top_p=None):
-
     print("generating for: ", prompt)
     model.eval()
     input_ids = tokenizer.encode(prompt)
@@ -102,6 +90,7 @@ def decode(
                 next_tok = next_tok / temperature
 
             eos_token = tokenizer.encode("<|endoftext|>")[0]
+            # print("eos", eos_token)
 
             if top_p is not None and top_p < 1.0:
                 next_token_id = nucleus_sampling(next_tok, top_p=top_p)
@@ -114,9 +103,12 @@ def decode(
             else:
                 next_token_id = rearrange(next_token_id, 'n -> 1 1')
 
+            new_token_str = tokenizer.decode([next_token_id.item()])
+            print(new_token_str, end='\n', flush=True)
+
             input_tensor = torch.cat([input_tensor, next_token_id], dim=1)
 
-            if next_token_id.item() == eos_token:
+            if "<|endoftext|>" in new_token_str:
                 break
 
     generated_ids = input_tensor[0].tolist()
@@ -125,10 +117,12 @@ def decode(
     return generated_text
 
 
-
 def get_prompt_output(
         tokenizer,
         prompt,
+        device=DEVICE,
+        temp=1,
+        topp=None,
 ):
     model = TransformerLm(
         vocab_size=10000,
@@ -140,21 +134,23 @@ def get_prompt_output(
         rope_theta=100000,
         weights=None,
     )
+    load_checkpoint_onlycpu(model, None, src=CHECK_POINT_PATH)
+    model = model.to(device)
+    model.eval()
 
     model = torch.compile(model)
-
-
-    load_checkpoint(model, None, src=CHECK_POINT_PATH)
 
     # print(len(tokenizer.vocab))
 
     generated_text = decode(model,
                             prompt=prompt,
                             tokenizer=tokenizer,
+                            device=device,
+                            temperature=temp,
+                            top_p=topp
                             )
 
     print(generated_text)
-
 
 
 if __name__ == "__main__":
@@ -162,10 +158,6 @@ if __name__ == "__main__":
     tokenizer = Tokenizer(vocab, merges, ['<|endoftext|>'])
     print("training complete")
 
-    get_prompt_output(tokenizer, "Hello, how are you doing?")
-
-    get_prompt_output(tokenizer, "When I die doing grad work, I want")
-
-    get_prompt_output(tokenizer, "I hate there is so much ice everywhere that")
-
-    get_prompt_output(tokenizer, "death is a")
+    get_prompt_output(tokenizer, "Hello, how are you doing?", temp=1, topp=0.5)
+    get_prompt_output(tokenizer, "Hello, how are you doing?", temp=0.5, topp=0.5)
+    get_prompt_output(tokenizer, "Hello, how are you doing?", temp=1.5, topp=0.5)

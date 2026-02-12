@@ -83,6 +83,7 @@ class Tokenizer:
     def encode(self, text_raw):
         # for special_token in self.special_tokens:
         #     text = text.replace(special_token, "")
+        print("got", text_raw)
         pattern_special = None
         if self.special_tokens:
             self.special_tokens = sorted(self.special_tokens, key=lambda s: len(s), reverse=True)
@@ -94,30 +95,30 @@ class Tokenizer:
         else:
             text_chunks = [text_raw]
 
-        # print("text_chunks", text_chunks)
+        print("text_chunks", text_chunks)
 
         res = []
         for text in text_chunks:
             if text in self.special_tokens:
-                # print("textrying to get", text.encode("utf-8"))
-                # print("got", self._token_to_id(text.encode("utf-8")))
+                print("textrying to get", text.encode("utf-8"))
+                print("got", self._token_to_id(text.encode("utf-8")))
                 res.append(self._token_to_id(text.encode("utf-8")))
                 pass
             elif text:
                 pre_tokens = []
                 for token in re.finditer(PAT, text):
-                    # print("while enoding, getting token", token.group().encode("utf-8"))
+                    print("while enoding, getting token", token.group().encode("utf-8"))
 
                     pre_tokens.append(tuple(bytes([b]) for b in token.group().encode("utf-8")))
 
-                # print("pre tokens", pre_tokens)
+                print("pre tokens", pre_tokens)
 
                 new_pre_tokens = []
                 for token_raw in pre_tokens:
                     merged = self._bpe_cache(token_raw)
                     new_pre_tokens.append(merged)
 
-                # print("new pre tokens:", new_pre_tokens)
+                print("new pre tokens:", new_pre_tokens)
 
                 for token in new_pre_tokens:
                     # print("token in new pre token", token)
@@ -170,6 +171,9 @@ class Tokenizer:
         #     if token == self.vocab[token_id]:
         #         return token_id
         # print("problem with token", token)
+        print(f" MISSING TOKEN: {token}")
+        print(f"   Token length: {len(token)} bytes")
+        print(f"   First 10 vocab tokens: {list(self.reverse_vocab.keys())[:10]}")
         raise Exception(f"No token id found for given token: {token} in the vocab")
 
 def get_tokenizer_util(
@@ -512,6 +516,7 @@ def save_bpe_model(
             f.write(f"{left_str} {right_str}\n")
 
 
+
 def load_bpe_model(
         vocab_filepath,
         merges_filepath
@@ -526,12 +531,12 @@ def load_bpe_model(
     merges = []
     with open(merges_filepath, 'r', encoding='utf-8') as f:
         for line in f:
-            line = line.strip()
+            line = line.rstrip('\n')
             if line:
-                parts = line.split(' ')
+                parts = line.split(' ', 1)
                 if len(parts) == 2:
                     left_str, right_str = parts
-                    left = left_str.encode('utf-8')
+                    left = left_str.encode('utf-8') if left_str else b' '
                     right = right_str.encode('utf-8')
                     merges.append((left, right))
 

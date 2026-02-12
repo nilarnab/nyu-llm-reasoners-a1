@@ -60,6 +60,26 @@ def save_checkpoint(
     return None
 
 
+def load_checkpoint_onlycpu(model, optimizer=None, src=None):
+    checkpoint = torch.load(src, map_location='cpu')
+    state_dict = checkpoint['model_state_dict']
+
+    new_state_dict = {}
+    for key, value in state_dict.items():
+        if key.startswith('_orig_mod.'):
+            new_key = key.replace('_orig_mod.', '')
+            new_state_dict[new_key] = value
+        else:
+            new_state_dict[key] = value
+
+    model.load_state_dict(new_state_dict)
+
+    if optimizer is not None and 'optimizer_state_dict' in checkpoint:
+        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+
+    return checkpoint.get('iteration', 0)
+
+
 def load_checkpoint(
         model: torch.nn.Module,
     optimizer: torch.optim.Optimizer,
