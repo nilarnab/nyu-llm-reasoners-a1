@@ -72,7 +72,9 @@ def load_checkpoint(
     iteration = system_state['it']
 
     model.load_state_dict(state_dict)
-    optimizer.load_state_dict(opt_state)
+
+    if optimizer is not None:
+        optimizer.load_state_dict(opt_state)
 
     return iteration
 

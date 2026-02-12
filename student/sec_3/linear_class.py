@@ -623,7 +623,11 @@ class TransformerLm(torch.nn.Module):
         for layer in self.transformer_blocks:
             transformer_val = layer.forward(transformer_val)
 
-        norm_val = self.rms_final_layer.forward(transformer_val)
+        if self.use_rms:
+            norm_val = self.rms_final_layer.forward(transformer_val)
+        else:
+            norm_val = transformer_val
+
         linear_val = self.linear_layer(norm_val)
 
         # TODO: why on earth softmax not to be used

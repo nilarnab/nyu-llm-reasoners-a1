@@ -19,10 +19,10 @@ from tqdm import tqdm
 from multiprocessing import Pool
 
 import student.bpe_trainer_sec_one as bpe_trainer_sec_one
+from student.bpe_trainer_sec_one import save_bpe_model
 from student.pretokenization_example import find_chunk_boundaries
 from student.sec_3.linear_class import TransformerLm
 from student.sec_4.training_utils import run_cross_entropy_util, get_lr_cosine_schedule, run_gradient_clipping_util
-from student.sec_5.main_training.main_loop import BATCH_SIZE
 from student.sec_5.training_loop import data_loader, save_checkpoint, load_checkpoint
 from tests.adapters import get_adamw_cls
 
@@ -135,25 +135,6 @@ def burn_gpu():
     print("GPU burn thread stopped")
 
 
-def save_vocab_json(vocab, path):
-    vocab_json = {}
-
-    for idx, token in vocab.items():
-        if isinstance(token, bytes):
-            token = token.decode("utf-8", errors="replace")
-        vocab_json[token] = int(idx)
-
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(vocab_json, f, ensure_ascii=False, indent=2)
-
-
-def save_merges_txt(merges, path):
-    with open(path, "w", encoding="utf-8") as f:
-        for a, b in merges:
-            a = a.decode("utf-8", errors="replace") if isinstance(a, bytes) else a
-            b = b.decode("utf-8", errors="replace") if isinstance(b, bytes) else b
-            f.write(f"{a} {b}\n")
-
 def tokenizer_training(vocab_path=VOCAB_SAVE_FILE, merge_path=MERGES_SAVE_FILE):
     print("Training BPE on", BPE_TRAIN_FILE_PATH_ABS)
     vocab, merges = bpe_trainer_sec_one.run_train_bpe_util(
@@ -165,8 +146,7 @@ def tokenizer_training(vocab_path=VOCAB_SAVE_FILE, merge_path=MERGES_SAVE_FILE):
     # TODO: Probably can save it
     tokenizer = bpe_trainer_sec_one.get_tokenizer_util(vocab, merges, SPECIAL_TOKENS)
 
-    save_vocab_json(vocab, vocab_path)
-    save_merges_txt(merges, merge_path)
+    save_bpe_model(vocab, merges, VOCAB_SAVE_FILE, MERGES_SAVE_FILE)
 
 
     return tokenizer
@@ -371,6 +351,7 @@ def main_training_loop(max_learning_rate,
             # )
             # logger_file.flush()
 
+        print("loss", loss.item())
         wandb.log({"train_loss": float(loss), "train_perplexity": math.exp(loss.item())}, step=it_id)
         # logger_csv_writer.writerow(
         #     [it_id, train_loss_val, "_"]
@@ -387,7 +368,7 @@ def main_training_loop(max_learning_rate,
 
         # checkpoint saving
         if it_id % SAVE_CHECK_POINT_ITERATION == 0:
-            save_checkpoint(model, optimizer, it_id + 1, f"{CHECKPOINT_FOLDER}/checkpoint_tuning_learning_rate_SESSION{SESSION_ID}_IT{it_id}.pt")
+            save_checkpoint(model, optimizer, it_id + 1, f"{CHECKPOINT_FOLDER}/checkpoint_remove_rms_SESSION{SESSION_ID}_IT{it_id}.pt")
 
 if __name__ == '__main__':
     if ENCODE_CORPUS:

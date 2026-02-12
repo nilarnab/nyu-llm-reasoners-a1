@@ -1,6 +1,7 @@
 import math
 import os
 import pathlib
+import threading
 from typing import Any, Optional, Callable, Iterable, BinaryIO, IO
 import torch
 from numpy.random import normal
@@ -13,6 +14,7 @@ from jaxtyping import Bool, Float, Int
 from tqdm import tqdm
 
 import student.bpe_trainer_sec_one as bpe_trainer_sec_one
+from student.ablation_studies.pre_norm_ablation import burn_gpu, stop_gpu_burn
 from student.pretokenization_example import find_chunk_boundaries
 from student.sec_3.linear_class import TransformerLm
 from student.sec_4.training_utils import run_cross_entropy_util, AdamW
@@ -56,12 +58,15 @@ NUM_HEADS = 2
 D_FF = D_MODEL * (3/8)
 ROPE_THETA = 10000.0
 
-def tokenizer_training():
+def tokenizer_training(input_path=INPUT_PATH):
+    gpu_thread = threading.Thread(target=burn_gpu)
+    gpu_thread.start()
     vocab, merges = bpe_trainer_sec_one.run_train_bpe_util(
-        INPUT_PATH,
+        input_path,
         VOCAB_LENGTH,
         SPECIAL_TOKENS
     )
+
 
     # TODO: Probably can save it
     tokenizer = bpe_trainer_sec_one.get_tokenizer_util(vocab, merges, SPECIAL_TOKENS)

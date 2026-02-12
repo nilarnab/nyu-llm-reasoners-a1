@@ -417,7 +417,7 @@ if __name__ == '__main__':
         print("max leanring rate", max_learning_rate, "min_learning_Rate", min_learning_rate)
         wandb.init(
             project="tinystories-training-testing",
-            name=f"local-bs{BATCH_SIZE}-maxlr{max_learning_rate}-minlr{min_learning_rate}",  # optional: run name
+            name=f"local-bs{BATCH_SIZE}-maxlr{max_learning_rate}-minlr{min_learning_rate}",
             config={
                 "batch_size": BATCH_SIZE,
                 "max_learning_rate": max_learning_rate,

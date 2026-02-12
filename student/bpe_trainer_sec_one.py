@@ -1,3 +1,4 @@
+import json
 import os
 import time
 from multiprocessing import Pool
@@ -400,6 +401,7 @@ def run_train_bpe_util(
     ) -> tuple[dict[int, bytes], list[tuple[bytes, bytes]]]:
     vocabulary = init_vocab(special_tokens)
 
+
     # print("Base vocabulary:", vocabulary)
     # print("base vocabulary size", len(vocabulary))
     frequency_table = get_pre_tokens(input_path, special_tokens)
@@ -481,6 +483,62 @@ def run_train_bpe_util(
 
     return vocabulary, merges
 
+
+def save_bpe_model(
+        vocabulary: dict[int, bytes],
+        merges,
+        vocab_filepath,
+        merges_filepath,
+) -> None:
+    vocab_dict = {}
+    for token_id, token_bytes in vocabulary.items():
+        try:
+            token_str = token_bytes.decode('utf-8')
+        except Exception:
+            token_str = token_bytes.decode('utf-8', errors='replace')
+        vocab_dict[token_str] = token_id
+
+    with open(vocab_filepath, 'w', encoding='utf-8') as f:
+        json.dump(vocab_dict, f, ensure_ascii=False, indent=2)
+
+    with open(merges_filepath, 'w', encoding='utf-8') as f:
+        for left, right in merges:
+            try:
+                left_str = left.decode('utf-8')
+                right_str = right.decode('utf-8')
+            except Exception:
+                left_str = left.decode('utf-8', errors='replace')
+                right_str = right.decode('utf-8', errors='replace')
+            f.write(f"{left_str} {right_str}\n")
+
+
+def load_bpe_model(
+        vocab_filepath,
+        merges_filepath
+) :
+    with open(vocab_filepath, 'r', encoding='utf-8') as f:
+        vocab_dict = json.load(f)
+
+    vocabulary = {}
+    for token_str, token_id in vocab_dict.items():
+        vocabulary[token_id] = token_str.encode('utf-8')
+
+    merges = []
+    with open(merges_filepath, 'r', encoding='utf-8') as f:
+        for line in f:
+            line = line.strip()
+            if line:
+                parts = line.split(' ')
+                if len(parts) == 2:
+                    left_str, right_str = parts
+                    left = left_str.encode('utf-8')
+                    right = right_str.encode('utf-8')
+                    merges.append((left, right))
+
+    return vocabulary, merges
+
+
+
 # starting 1:35
 # =====
 
@@ -489,27 +547,43 @@ def run_train_bpe_util(
 
 
 def main():
+    vocab, merges = run_train_bpe_util_profiled(
+        input_path="/Users/nilarnabdebnath/Documents/course_work/sem2/llm_reasoners/assignment1/nyu-llm-reasoners-a1/tests/fixtures/TinyStoriesV2-GPT4-valid.txt",
+        vocab_size=10000,
+        special_tokens=["<|endoftext|>"])
+
+    save_bpe_model(vocab, merges,
+                   '/Users/nilarnabdebnath/Documents/course_work/sem2/llm_reasoners/assignment1/nyu-llm-reasoners-a1/vocab.json',
+                   '/Users/nilarnabdebnath/Documents/course_work/sem2/llm_reasoners/assignment1/nyu-llm-reasoners-a1/mreges.txt')
+
+    vocab, merges = load_bpe_model('/Users/nilarnabdebnath/Documents/course_work/sem2/llm_reasoners/assignment1/nyu-llm-reasoners-a1/vocab.json',
+                           '/Users/nilarnabdebnath/Documents/course_work/sem2/llm_reasoners/assignment1/nyu-llm-reasoners-a1/mreges.txt')
+
+    print(vocab)
+    print(merges)
+    tokenizer = Tokenizer(vocab, merges, [])
+    print("tokenizer ready")
     # run_train_bpe_util_profiled(
     #     input_path="/Users/nilarnabdebnath/Documents/course_work/sem2/llm_reasoners/assignment1/nyu-llm-reasoners-a1/tests/fixtures/TinyStoriesV2-GPT4-train.txt",
     #     vocab_size=10000,
     #     special_tokens=["<|endoftext|>"])
-    peak_mem, result = memory_usage(
-        (run_train_bpe_util_profiled, (), {  # function, args tuple, kwargs dict
-            "input_path": '/Users/nilarnabdebnath/Documents/course_work/sem2/llm_reasoners/assignment1/nyu-llm-reasoners-a1/tests/fixtures/TinyStoriesV2-GPT4-train.txt',
-            "vocab_size": 10000,
-            "special_tokens": ["<|endoftext|>"]
-        }),
-        retval=True,
-        max_usage=True,
-    )
-
-    vocab, merges = result
-    longest_token, length = get_longest_token(vocab)
-
-    print("longest token", length)
-
-    print(f"Peak memory usage: {peak_mem:.2f} MB")
-    return result
+    # peak_mem, result = memory_usage(
+    #     (run_train_bpe_util_profiled, (), {  # function, args tuple, kwargs dict
+    #         "input_path": '/Users/nilarnabdebnath/Documents/course_work/sem2/llm_reasoners/assignment1/nyu-llm-reasoners-a1/tests/fixtures/TinyStoriesV2-GPT4-train.txt',
+    #         "vocab_size": 10000,
+    #         "special_tokens": ["<|endoftext|>"]
+    #     }),
+    #     retval=True,
+    #     max_usage=True,
+    # )
+    #
+    # vocab, merges = result
+    # longest_token, length = get_longest_token(vocab)
+    #
+    # print("longest token", length)
+    #
+    # print(f"Peak memory usage: {peak_mem:.2f} MB")
+    # return result
 
 
 if __name__ == "__main__":
