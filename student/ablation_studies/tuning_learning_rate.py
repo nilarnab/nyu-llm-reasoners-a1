@@ -23,7 +23,6 @@ from student.bpe_trainer_sec_one import save_bpe_model
 from student.pretokenization_example import find_chunk_boundaries
 from student.sec_3.linear_class import TransformerLm
 from student.sec_4.training_utils import run_cross_entropy_util, get_lr_cosine_schedule, run_gradient_clipping_util
-from student.sec_5.main_training.main_loop import BATCH_SIZE
 from student.sec_5.training_loop import data_loader, save_checkpoint, load_checkpoint
 from tests.adapters import get_adamw_cls
 
@@ -109,7 +108,7 @@ VOCAB_LENGTH = 5000
 SPECIAL_TOKENS = ["<|endoftext|>"]
 
 # TRAINING MODE
-ENCODE_CORPUS = True
+ENCODE_CORPUS = False
 
 # MODEL ARCCHITECTURE CONTROL
 D_MODEL = 512
@@ -397,7 +396,7 @@ if __name__ == '__main__':
         min_learning_rate = max_learning_rate * MIN_LR_RATIO
         print("max leanring rate", max_learning_rate, "min_learning_Rate", min_learning_rate)
         wandb.init(
-            project="tinystories-training-testing",
+            project="tinystories-training",
             name=f"local-bs{BATCH_SIZE}-maxlr{max_learning_rate}-minlr{min_learning_rate}",
             config={
                 "batch_size": BATCH_SIZE,

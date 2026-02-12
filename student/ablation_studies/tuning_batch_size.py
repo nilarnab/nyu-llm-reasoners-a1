@@ -22,7 +22,6 @@ import student.bpe_trainer_sec_one as bpe_trainer_sec_one
 from student.pretokenization_example import find_chunk_boundaries
 from student.sec_3.linear_class import TransformerLm
 from student.sec_4.training_utils import run_cross_entropy_util, get_lr_cosine_schedule, run_gradient_clipping_util
-from student.sec_5.main_training.main_loop import BATCH_SIZE
 from student.sec_5.training_loop import data_loader, save_checkpoint
 from tests.adapters import get_adamw_cls
 from tests.conftest import batch_size
